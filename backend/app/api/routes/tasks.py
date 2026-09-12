@@ -4,9 +4,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies import get_current_manager, get_current_user, get_db
 from app.models.project import Project, project_members
-from app.models.task import Task, task_blockers
+from app.models.task import Task, TaskStatus, task_blockers
 from app.models.user import User, UserRole
-from app.schemas.tasks import TaskResponse, TaskWriteRequest
+from app.schemas.tasks import TaskResponse, TaskStatusChangeRequest, TaskWriteRequest
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -65,6 +65,29 @@ def _set_blockers(session: Session, task: Task, blocker_ids: list[int]) -> None:
     task.blockers = blockers
 
 
+def _move_task(task: Task, target_status: TaskStatus) -> None:
+    if target_status not in task.available_statuses:
+        if (
+            task.status == TaskStatus.IN_REVIEW
+            and target_status == TaskStatus.DONE
+            and any(blocker.status != TaskStatus.DONE for blocker in task.blockers)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Task cannot move to Done while unfinished blocking tasks remain.",
+            )
+        legal_moves = ", ".join(move.value.replace("_", " ").title() for move in task.available_statuses) or "none"
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Task cannot move from {task.status.value.replace('_', ' ').title()} "
+                f"to {target_status.value.replace('_', ' ').title()}. Legal moves: {legal_moves}."
+            ),
+        )
+    task.blocked_from = task.status if target_status == TaskStatus.BLOCKED else None
+    task.status = target_status
+
+
 @router.get("/projects/{project_id}", response_model=list[TaskResponse])
 def list_project_tasks(
     project_id: int,
@@ -97,6 +120,19 @@ def create_task(
     return session.scalar(_task_query().where(Task.id == task.id))
 
 
+@router.post("/{task_id}/status", response_model=TaskResponse)
+def change_task_status(
+    task_id: int,
+    payload: TaskStatusChangeRequest,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> Task:
+    task = _get_visible_task(session, task_id, user)
+    _move_task(task, payload.status)
+    session.commit()
+    return session.scalar(_task_query().where(Task.id == task.id))
+
+
 @router.get("/{task_id}", response_model=TaskResponse)
 def get_task(task_id: int, user: User = Depends(get_current_user), session: Session = Depends(get_db)) -> Task:
     return _get_visible_task(session, task_id, user)
@@ -115,6 +151,11 @@ def update_task(
     task.priority = payload.priority
     task.due_date = payload.due_date
     _set_blockers(session, task, payload.blocker_ids)
+    if task.status == TaskStatus.DONE and any(blocker.status != TaskStatus.DONE for blocker in task.blockers):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A done task cannot have unfinished blocking tasks.",
+        )
     session.commit()
     return session.scalar(_task_query().where(Task.id == task.id))
 

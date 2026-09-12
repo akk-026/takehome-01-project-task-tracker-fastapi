@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.task import TaskPriority
+from app.models.task import TaskPriority, TaskStatus
 
 
 class TaskWriteRequest(BaseModel):
@@ -11,6 +11,10 @@ class TaskWriteRequest(BaseModel):
     priority: TaskPriority = TaskPriority.MEDIUM
     due_date: date | None = None
     blocker_ids: list[int] = Field(default_factory=list)
+
+
+class TaskStatusChangeRequest(BaseModel):
+    status: TaskStatus
 
 
 class TaskResponse(BaseModel):
@@ -22,6 +26,9 @@ class TaskResponse(BaseModel):
     description: str
     priority: TaskPriority
     due_date: date | None
+    status: TaskStatus
+    blocked_from: TaskStatus | None
     blocker_ids: list[int]
+    available_statuses: list[TaskStatus]
     created_at: datetime
     updated_at: datetime

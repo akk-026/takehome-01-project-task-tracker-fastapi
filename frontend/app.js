@@ -43,6 +43,15 @@ function taskChoices(tasks, selectedIds = [], currentTaskId = null) {
     : '<p class="hint">No other tasks are available as blockers.</p>';
 }
 
+function statusLabel(status) {
+  return status.split('_').map(word => word[0] + word.slice(1).toLowerCase()).join(' ');
+}
+
+function statusControls(task) {
+  if (!task.available_statuses.length) return '<p class="hint">No status moves are available.</p>';
+  return `<div class="status-actions">${task.available_statuses.map(nextStatus => `<button class="status-move secondary" data-task-id="${task.id}" data-status="${nextStatus}">Move to ${escapeHtml(statusLabel(nextStatus))}</button>`).join('')}</div>`;
+}
+
 function projectCard(project, isManager, users) {
   const memberNames = project.members.map(member => escapeHtml(member.name)).join(', ') || 'No members';
   const ownerOptions = users.map(person => `<option value="${person.id}" ${person.id === project.owner.id ? 'selected' : ''}>${escapeHtml(person.name)}</option>`).join('');
@@ -56,7 +65,7 @@ function projectCard(project, isManager, users) {
 function taskCard(task, tasks, isManager) {
   const blockerNames = task.blocker_ids.map(id => tasks.find(candidate => candidate.id === id)?.title || `Task #${id}`).map(escapeHtml).join(', ');
   const deleteControl = isManager ? `<button class="delete-task" data-task-id="${task.id}">Delete task</button>` : '';
-  return `<article class="task"><div class="task-heading"><h3>${escapeHtml(task.title)}</h3><span class="priority ${task.priority.toLowerCase()}">${escapeHtml(task.priority)}</span></div><p>${escapeHtml(task.description || 'No description yet.')}</p><small><b>Due:</b> ${task.due_date || 'No due date'} · <b>Blocked by:</b> ${blockerNames || 'Nothing'}</small><details><summary>Edit task</summary><form class="edit-task-form" data-task-id="${task.id}"><label>Title</label><input name="title" maxlength="300" value="${escapeHtml(task.title)}" required><label>Description</label><textarea name="description" maxlength="4000">${escapeHtml(task.description)}</textarea><label>Priority</label><select name="priority">${['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(priority => `<option value="${priority}" ${priority === task.priority ? 'selected' : ''}>${priority}</option>`).join('')}</select><label>Due date</label><input name="dueDate" type="date" value="${task.due_date || ''}"><fieldset><legend>Blocked by</legend>${taskChoices(tasks, task.blocker_ids, task.id)}</fieldset><button>Save task</button></form>${deleteControl}</details></article>`;
+  return `<article class="task"><div class="task-heading"><h3>${escapeHtml(task.title)}</h3><div class="task-badges"><span class="task-status ${task.status.toLowerCase()}">${escapeHtml(statusLabel(task.status))}</span><span class="priority ${task.priority.toLowerCase()}">${escapeHtml(task.priority)}</span></div></div><p>${escapeHtml(task.description || 'No description yet.')}</p><small><b>Due:</b> ${task.due_date || 'No due date'} · <b>Blocked by:</b> ${blockerNames || 'Nothing'}</small>${statusControls(task)}<details><summary>Edit task</summary><form class="edit-task-form" data-task-id="${task.id}"><label>Title</label><input name="title" maxlength="300" value="${escapeHtml(task.title)}" required><label>Description</label><textarea name="description" maxlength="4000">${escapeHtml(task.description)}</textarea><label>Priority</label><select name="priority">${['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(priority => `<option value="${priority}" ${priority === task.priority ? 'selected' : ''}>${priority}</option>`).join('')}</select><label>Due date</label><input name="dueDate" type="date" value="${task.due_date || ''}"><fieldset><legend>Blocked by</legend>${taskChoices(tasks, task.blocker_ids, task.id)}</fieldset><button>Save task</button></form>${deleteControl}</details></article>`;
 }
 
 function taskPayload(values) {
@@ -90,6 +99,14 @@ async function showProjectDetail(user, projectId, showArchived = false, error = 
         event.preventDefault();
         try {
           await api(`/api/tasks/${form.dataset.taskId}`, { method: 'PUT', body: JSON.stringify(taskPayload(new FormData(form))) });
+          showProjectDetail(user, projectId, showArchived);
+        } catch (reason) { showProjectDetail(user, projectId, showArchived, reason.message); }
+      };
+    });
+    document.querySelectorAll('.status-move').forEach(button => {
+      button.onclick = async () => {
+        try {
+          await api(`/api/tasks/${button.dataset.taskId}/status`, { method: 'POST', body: JSON.stringify({ status: button.dataset.status }) });
           showProjectDetail(user, projectId, showArchived);
         } catch (reason) { showProjectDetail(user, projectId, showArchived, reason.message); }
       };

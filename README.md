@@ -8,6 +8,10 @@ Managers can also edit project details and restore archived projects; archived p
 from the default project list without deleting their records.
 Tasks live inside one project and include descriptions, priorities, optional due dates, and
 same-project blockers. Project members can create and edit tasks; only managers can delete them.
+Tasks begin in Backlog and advance through In Progress, In Review, and Done. They may be blocked
+from either active state and return to that state when unblocked; reopening a completed task returns
+it to In Progress. The API supplies each task's currently legal next moves, while independently
+rejecting invalid transitions and completion with unfinished blockers.
 
 ## Run locally
 

@@ -30,6 +30,8 @@ def _migrate_legacy_tasks() -> None:
         "description": "VARCHAR(4000) NOT NULL DEFAULT ''",
         "priority": "VARCHAR(8) NOT NULL DEFAULT 'MEDIUM'",
         "due_date": "DATE",
+        "status": "VARCHAR(15) NOT NULL DEFAULT 'BACKLOG'",
+        "blocked_from": "VARCHAR(15)",
         "updated_at": "DATETIME",
     }
     with engine.begin() as connection:

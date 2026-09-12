@@ -46,6 +46,15 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         return response.json()
 
+    def move_task(self, task_id: int, status: str, session: dict | None = None) -> dict:
+        response = self.client.post(
+            f"/api/tasks/{task_id}/status",
+            headers=self.headers(session or self.manager),
+            json={"status": status},
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
     def test_project_member_can_create_edit_and_view_project_tasks(self) -> None:
         project = self.create_project("OPS", self.dan["user"]["id"], [self.dan["user"]["id"]])
         first = self.create_task(
@@ -111,3 +120,51 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(tasks[0]["id"], dependent_task["id"])
         self.assertEqual(tasks[0]["blocker_ids"], [])
         self.assertEqual(self.client.get(f"/api/projects/{project['id']}", headers=self.headers(self.manager)).status_code, 200)
+
+    def test_task_lifecycle_only_allows_legal_moves_and_respects_blockers(self) -> None:
+        project = self.create_project("OPS", self.dan["user"]["id"], [self.dan["user"]["id"]])
+        blocker = self.create_task(project["id"], {"title": "Finish research"})
+        task = self.create_task(project["id"], {"title": "Publish proposal", "blocker_ids": [blocker["id"]]})
+
+        invalid_jump = self.client.post(
+            f"/api/tasks/{task['id']}/status",
+            headers=self.headers(self.dan),
+            json={"status": "DONE"},
+        )
+        self.assertEqual(invalid_jump.status_code, 422)
+        self.assertIn("Backlog", invalid_jump.json()["detail"])
+        self.assertIn("In Progress", invalid_jump.json()["detail"])
+
+        in_progress = self.move_task(task["id"], "IN_PROGRESS", self.dan)
+        self.assertEqual(in_progress["status"], "IN_PROGRESS")
+        self.assertEqual(in_progress["available_statuses"], ["IN_REVIEW", "BLOCKED"])
+        in_review = self.move_task(task["id"], "IN_REVIEW", self.dan)
+        self.assertEqual(in_review["available_statuses"], ["BLOCKED"])
+
+        unfinished_blocker = self.client.post(
+            f"/api/tasks/{task['id']}/status",
+            headers=self.headers(self.dan),
+            json={"status": "DONE"},
+        )
+        self.assertEqual(unfinished_blocker.status_code, 422)
+        self.assertIn("unfinished blocking tasks", unfinished_blocker.json()["detail"])
+
+        self.move_task(blocker["id"], "IN_PROGRESS", self.dan)
+        self.move_task(blocker["id"], "IN_REVIEW", self.dan)
+        self.move_task(blocker["id"], "DONE", self.dan)
+
+        ready_to_finish = self.client.get(f"/api/tasks/{task['id']}", headers=self.headers(self.dan)).json()
+        self.assertEqual(ready_to_finish["available_statuses"], ["DONE", "BLOCKED"])
+        blocked = self.move_task(task["id"], "BLOCKED", self.dan)
+        self.assertEqual(blocked["status"], "BLOCKED")
+        self.assertEqual(blocked["blocked_from"], "IN_REVIEW")
+        self.assertEqual(blocked["available_statuses"], ["IN_REVIEW"])
+        unblocked = self.move_task(task["id"], "IN_REVIEW", self.dan)
+        self.assertEqual(unblocked["status"], "IN_REVIEW")
+        self.assertIsNone(unblocked["blocked_from"])
+
+        completed = self.move_task(task["id"], "DONE", self.dan)
+        self.assertEqual(completed["status"], "DONE")
+        self.assertEqual(completed["available_statuses"], ["IN_PROGRESS"])
+        reopened = self.move_task(task["id"], "IN_PROGRESS", self.dan)
+        self.assertEqual(reopened["status"], "IN_PROGRESS")
