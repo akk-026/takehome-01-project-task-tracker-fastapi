@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -47,3 +48,24 @@ class TaskSearchResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class TaskBulkUpdateRequest(BaseModel):
+    task_ids: list[int] = Field(min_length=1, max_length=100)
+    action: Literal["status", "assignees", "due_date"]
+    status: TaskStatus | None = None
+    assignee_ids: list[int] = Field(default_factory=list)
+    due_date: date | None = None
+
+
+class BulkTaskResult(BaseModel):
+    task_id: int
+    succeeded: bool
+    detail: str
+    task: TaskResponse | None = None
+
+
+class BulkTaskUpdateResponse(BaseModel):
+    results: list[BulkTaskResult]
+    succeeded: int
+    rejected: int

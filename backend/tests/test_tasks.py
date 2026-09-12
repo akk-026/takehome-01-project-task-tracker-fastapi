@@ -320,3 +320,71 @@ class TaskTests(unittest.TestCase):
         )
         self.assertEqual(archived.status_code, 200)
         self.assertEqual(search(self.dan)["total"], 0)
+
+    def test_bulk_updates_report_each_task_and_export_uses_finder_filters(self) -> None:
+        operations = self.create_project(
+            "OPS",
+            self.dan["user"]["id"],
+            [self.dan["user"]["id"], self.priya["user"]["id"]],
+        )
+        private_web = self.create_project("WEB", self.priya["user"]["id"], [self.priya["user"]["id"]])
+        ready_task = self.create_task(
+            operations["id"],
+            {"title": "Bulk-ready task", "description": "Export this task.", "assignee_ids": [self.dan["user"]["id"]]},
+            self.dan,
+        )
+        in_progress_task = self.create_task(operations["id"], {"title": "Already started"}, self.dan)
+        self.move_task(in_progress_task["id"], "IN_PROGRESS", self.dan)
+        private_task = self.create_task(private_web["id"], {"title": "Private task"})
+
+        status_change = self.client.post(
+            "/api/tasks/bulk",
+            headers=self.headers(self.dan),
+            json={
+                "task_ids": [ready_task["id"], in_progress_task["id"], private_task["id"]],
+                "action": "status",
+                "status": "IN_PROGRESS",
+            },
+        )
+        self.assertEqual(status_change.status_code, 200)
+        status_results = {result["task_id"]: result for result in status_change.json()["results"]}
+        self.assertTrue(status_results[ready_task["id"]]["succeeded"])
+        self.assertFalse(status_results[in_progress_task["id"]]["succeeded"])
+        self.assertIn("cannot move", status_results[in_progress_task["id"]]["detail"])
+        self.assertFalse(status_results[private_task["id"]]["succeeded"])
+        self.assertEqual(status_change.json()["succeeded"], 1)
+        self.assertEqual(status_change.json()["rejected"], 2)
+
+        assignee_change = self.client.post(
+            "/api/tasks/bulk",
+            headers=self.headers(self.manager),
+            json={
+                "task_ids": [ready_task["id"], private_task["id"]],
+                "action": "assignees",
+                "assignee_ids": [self.dan["user"]["id"]],
+            },
+        )
+        self.assertEqual(assignee_change.status_code, 200)
+        assignee_results = {result["task_id"]: result for result in assignee_change.json()["results"]}
+        self.assertTrue(assignee_results[ready_task["id"]]["succeeded"])
+        self.assertFalse(assignee_results[private_task["id"]]["succeeded"])
+        self.assertIn("member", assignee_results[private_task["id"]]["detail"])
+
+        due_date_change = self.client.post(
+            "/api/tasks/bulk",
+            headers=self.headers(self.manager),
+            json={"task_ids": [ready_task["id"], private_task["id"]], "action": "due_date", "due_date": "2030-12-31"},
+        )
+        self.assertEqual(due_date_change.status_code, 200)
+        self.assertEqual(due_date_change.json()["succeeded"], 2)
+
+        export = self.client.get(
+            "/api/tasks/export",
+            headers=self.headers(self.manager),
+            params={"q": "Bulk-ready", "status": "IN_PROGRESS"},
+        )
+        self.assertEqual(export.status_code, 200)
+        self.assertEqual(export.headers["content-type"], "text/csv; charset=utf-8")
+        self.assertIn('attachment; filename="northstar-tasks.csv"', export.headers["content-disposition"])
+        self.assertIn("Bulk-ready task", export.text)
+        self.assertNotIn("Private task", export.text)

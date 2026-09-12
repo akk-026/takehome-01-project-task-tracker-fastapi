@@ -1,4 +1,6 @@
+import csv
 from datetime import date
+from io import StringIO
 from math import ceil
 from typing import Literal
 
@@ -10,7 +12,16 @@ from app.api.dependencies import get_current_manager, get_current_user, get_db
 from app.models.project import Project, project_members
 from app.models.task import Task, TaskPriority, TaskStatus, task_assignees, task_blockers
 from app.models.user import User, UserRole
-from app.schemas.tasks import AssignedTaskResponse, TaskResponse, TaskSearchResponse, TaskStatusChangeRequest, TaskWriteRequest
+from app.schemas.tasks import (
+    AssignedTaskResponse,
+    BulkTaskResult,
+    BulkTaskUpdateResponse,
+    TaskBulkUpdateRequest,
+    TaskResponse,
+    TaskSearchResponse,
+    TaskStatusChangeRequest,
+    TaskWriteRequest,
+)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -31,6 +42,49 @@ def _task_search_statement(user: User):
     if user.role == UserRole.MEMBER:
         statement = statement.join(project_members)
     return statement
+
+
+def _task_search_filters(
+    user: User,
+    q: str,
+    project_id: int | None,
+    task_status: TaskStatus | None,
+    assignee_id: int | None,
+    priority: TaskPriority | None,
+    overdue: bool,
+) -> list:
+    filters = _visible_task_filters(user)
+    clean_query = q.strip()
+    if clean_query:
+        filters.append(or_(Task.title.ilike(f"%{clean_query}%"), Task.description.ilike(f"%{clean_query}%")))
+    if project_id is not None:
+        filters.append(Task.project_id == project_id)
+    if task_status is not None:
+        filters.append(Task.status == task_status)
+    if assignee_id is not None:
+        filters.append(Task.assignees.any(User.id == assignee_id))
+    if priority is not None:
+        filters.append(Task.priority == priority)
+    if overdue:
+        filters.extend([Task.due_date.is_not(None), Task.due_date < date.today(), Task.status != TaskStatus.DONE])
+    return filters
+
+
+def _task_order_by(sort_by: str, sort_direction: str) -> list:
+    if sort_by == "due_date":
+        null_due_dates_last = case((Task.due_date.is_(None), 1), else_=0).asc()
+        due_date_order = Task.due_date.asc() if sort_direction == "asc" else Task.due_date.desc()
+        return [null_due_dates_last, due_date_order]
+    if sort_by == "priority":
+        priority_rank = case(
+            (Task.priority == TaskPriority.LOW, 1),
+            (Task.priority == TaskPriority.MEDIUM, 2),
+            (Task.priority == TaskPriority.HIGH, 3),
+            (Task.priority == TaskPriority.CRITICAL, 4),
+            else_=0,
+        )
+        return [priority_rank.asc() if sort_direction == "asc" else priority_rank.desc()]
+    return [Task.updated_at.asc() if sort_direction == "asc" else Task.updated_at.desc()]
 
 
 def _clean_title(title: str) -> str:
@@ -165,40 +219,13 @@ def search_tasks(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_db),
 ) -> TaskSearchResponse:
-    filters = _visible_task_filters(user)
-    clean_query = q.strip()
-    if clean_query:
-        filters.append(or_(Task.title.ilike(f"%{clean_query}%"), Task.description.ilike(f"%{clean_query}%")))
-    if project_id is not None:
-        filters.append(Task.project_id == project_id)
-    if task_status is not None:
-        filters.append(Task.status == task_status)
-    if assignee_id is not None:
-        filters.append(Task.assignees.any(User.id == assignee_id))
-    if priority is not None:
-        filters.append(Task.priority == priority)
-    if overdue:
-        filters.extend([Task.due_date.is_not(None), Task.due_date < date.today(), Task.status != TaskStatus.DONE])
+    filters = _task_search_filters(user, q, project_id, task_status, assignee_id, priority, overdue)
 
     count_statement = select(func.count(Task.id)).select_from(Task).join(Project)
     if user.role == UserRole.MEMBER:
         count_statement = count_statement.join(project_members)
     total = session.scalar(count_statement.where(*filters)) or 0
-    if sort_by == "due_date":
-        null_due_dates_last = case((Task.due_date.is_(None), 1), else_=0).asc()
-        sort_column = Task.due_date
-        order_by = [null_due_dates_last, sort_column.asc() if sort_direction == "asc" else sort_column.desc()]
-    elif sort_by == "priority":
-        priority_rank = case(
-            (Task.priority == TaskPriority.LOW, 1),
-            (Task.priority == TaskPriority.MEDIUM, 2),
-            (Task.priority == TaskPriority.HIGH, 3),
-            (Task.priority == TaskPriority.CRITICAL, 4),
-            else_=0,
-        )
-        order_by = [priority_rank.asc() if sort_direction == "asc" else priority_rank.desc()]
-    else:
-        order_by = [Task.updated_at.asc() if sort_direction == "asc" else Task.updated_at.desc()]
+    order_by = _task_order_by(sort_by, sort_direction)
 
     tasks = list(
         session.scalars(
@@ -216,6 +243,95 @@ def search_tasks(
         page=page,
         page_size=page_size,
         total_pages=ceil(total / page_size),
+    )
+
+
+@router.get("/export")
+def export_tasks(
+    q: str = Query(default="", max_length=300),
+    project_id: int | None = None,
+    task_status: TaskStatus | None = Query(default=None, alias="status"),
+    assignee_id: int | None = None,
+    priority: TaskPriority | None = None,
+    overdue: bool = False,
+    sort_by: Literal["due_date", "priority", "updated_at"] = "updated_at",
+    sort_direction: Literal["asc", "desc"] = "desc",
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> Response:
+    """Export every visible task that matches the same server-side finder filters."""
+    filters = _task_search_filters(user, q, project_id, task_status, assignee_id, priority, overdue)
+    tasks = list(
+        session.scalars(
+            _task_search_statement(user)
+            .where(*filters)
+            .options(selectinload(Task.project))
+            .order_by(*_task_order_by(sort_by, sort_direction), Task.id.desc())
+        )
+    )
+
+    output = StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(["Project key", "Project", "Title", "Description", "Status", "Priority", "Due date", "Assignees", "Last updated"])
+    for task in tasks:
+        writer.writerow(
+            [
+                task.project.key,
+                task.project.name,
+                task.title,
+                task.description,
+                task.status.value,
+                task.priority.value,
+                task.due_date.isoformat() if task.due_date else "",
+                ", ".join(assignee.name for assignee in task.assignees),
+                task.updated_at.isoformat() if task.updated_at else "",
+            ]
+        )
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="northstar-tasks.csv"'},
+    )
+
+
+def _validate_bulk_request(payload: TaskBulkUpdateRequest) -> None:
+    if payload.action == "status" and payload.status is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Choose a status for the bulk change.")
+
+
+@router.post("/bulk", response_model=BulkTaskUpdateResponse)
+def bulk_update_tasks(
+    payload: TaskBulkUpdateRequest,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> BulkTaskUpdateResponse:
+    """Apply one change per task, retaining successful updates when siblings fail."""
+    _validate_bulk_request(payload)
+    results: list[BulkTaskResult] = []
+
+    for task_id in dict.fromkeys(payload.task_ids):
+        try:
+            with session.begin_nested():
+                task = _get_visible_task(session, task_id, user)
+                if payload.action == "status":
+                    _move_task(task, payload.status)
+                    detail = f"Moved to {task.status.value.replace('_', ' ').title()}."
+                elif payload.action == "assignees":
+                    _set_assignees(session, task, payload.assignee_ids)
+                    detail = "Assignees replaced."
+                else:
+                    task.due_date = payload.due_date
+                    detail = "Due date updated."
+                session.flush()
+                results.append(BulkTaskResult(task_id=task_id, succeeded=True, detail=detail, task=task))
+        except HTTPException as error:
+            results.append(BulkTaskResult(task_id=task_id, succeeded=False, detail=str(error.detail)))
+
+    session.commit()
+    return BulkTaskUpdateResponse(
+        results=results,
+        succeeded=sum(result.succeeded for result in results),
+        rejected=sum(not result.succeeded for result in results),
     )
 
 

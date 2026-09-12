@@ -18,6 +18,10 @@ their assignments in that project.
 The task finder performs all cross-project search, filtering, sorting and pagination in FastAPI.
 It supports title/description search plus project, status, assignee, priority and overdue filters,
 and returns the total matching count with every page.
+Selected finder tasks can receive one bulk status, assignee-replacement, or due-date change. The
+server applies the normal rules independently to each task and returns a success or rejection reason
+for every selected item; valid changes are not rolled back because another item was invalid. The
+currently filtered finder results can also be exported as a server-generated CSV file.
 
 ## Run locally
 
