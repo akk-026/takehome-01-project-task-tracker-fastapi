@@ -6,6 +6,8 @@ includes server-enforced manager/member permissions: only managers can create or
 replace a project's membership, or delete a task. Members only receive projects they belong to.
 Managers can also edit project details and restore archived projects; archived projects are omitted
 from the default project list without deleting their records.
+Tasks live inside one project and include descriptions, priorities, optional due dates, and
+same-project blockers. Project members can create and edit tasks; only managers can delete them.
 
 ## Run locally
 
