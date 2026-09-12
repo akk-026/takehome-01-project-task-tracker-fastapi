@@ -1,13 +1,17 @@
 const root = document.querySelector('#app');
 const tokenKey = 'northstar-token';
+const apiBaseUrl = window.location.port === '8000' ? '' : 'http://localhost:8000';
 
 async function api(path, options = {}) {
   const token = localStorage.getItem(tokenKey);
-  const response = await fetch(path, {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
     ...options,
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }
   });
-  const body = response.status === 204 ? null : await response.json();
+  const contentType = response.headers.get('content-type') || '';
+  const body = response.status === 204 ? null : contentType.includes('application/json')
+    ? await response.json()
+    : { detail: 'The app could not reach the FastAPI API. Start it on http://localhost:8000.' };
   if (!response.ok) throw new Error(body.detail || 'Request failed.');
   return body;
 }

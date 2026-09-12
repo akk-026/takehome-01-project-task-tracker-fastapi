@@ -12,8 +12,9 @@ cd backend
 ../.venv/bin/uvicorn app.main:app --reload
 ```
 
-Open the API health check at [http://localhost:8000/api/health](http://localhost:8000/api/health).
-The frontend is being built feature by feature in `frontend/`.
+Open the app at [http://localhost:8000](http://localhost:8000). The API health check is available at
+[http://localhost:8000/api/health](http://localhost:8000/api/health). If you serve `frontend/` with
+another local server on port 3000, it will use the FastAPI API on port 8000 automatically.
 
 ## Test
 
