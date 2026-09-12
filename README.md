@@ -15,6 +15,9 @@ rejecting invalid transitions and completion with unfinished blockers.
 Tasks also support multiple assignees, limited to the task's project members. Each person's home
 view includes all of their assigned tasks across projects; removing a member from a project clears
 their assignments in that project.
+The task finder performs all cross-project search, filtering, sorting and pagination in FastAPI.
+It supports title/description search plus project, status, assignee, priority and overdue filters,
+and returns the total matching count with every page.
 
 ## Run locally
 

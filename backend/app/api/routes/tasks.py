@@ -1,18 +1,36 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, or_, select
+from datetime import date
+from math import ceil
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies import get_current_manager, get_current_user, get_db
 from app.models.project import Project, project_members
-from app.models.task import Task, TaskStatus, task_assignees, task_blockers
+from app.models.task import Task, TaskPriority, TaskStatus, task_assignees, task_blockers
 from app.models.user import User, UserRole
-from app.schemas.tasks import AssignedTaskResponse, TaskResponse, TaskStatusChangeRequest, TaskWriteRequest
+from app.schemas.tasks import AssignedTaskResponse, TaskResponse, TaskSearchResponse, TaskStatusChangeRequest, TaskWriteRequest
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 def _task_query():
     return select(Task).options(selectinload(Task.blockers), selectinload(Task.assignees))
+
+
+def _visible_task_filters(user: User) -> list:
+    filters = [Task.deleted.is_(False), Project.archived.is_(False)]
+    if user.role == UserRole.MEMBER:
+        filters.append(project_members.c.user_id == user.id)
+    return filters
+
+
+def _task_search_statement(user: User):
+    statement = _task_query().join(Project)
+    if user.role == UserRole.MEMBER:
+        statement = statement.join(project_members)
+    return statement
 
 
 def _clean_title(title: str) -> str:
@@ -129,6 +147,75 @@ def list_assigned_tasks(user: User = Depends(get_current_user), session: Session
             .where(task_assignees.c.user_id == user.id, Task.deleted.is_(False))
             .order_by(Task.updated_at.desc())
         )
+    )
+
+
+@router.get("", response_model=TaskSearchResponse)
+def search_tasks(
+    q: str = Query(default="", max_length=300),
+    project_id: int | None = None,
+    task_status: TaskStatus | None = Query(default=None, alias="status"),
+    assignee_id: int | None = None,
+    priority: TaskPriority | None = None,
+    overdue: bool = False,
+    sort_by: Literal["due_date", "priority", "updated_at"] = "updated_at",
+    sort_direction: Literal["asc", "desc"] = "desc",
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> TaskSearchResponse:
+    filters = _visible_task_filters(user)
+    clean_query = q.strip()
+    if clean_query:
+        filters.append(or_(Task.title.ilike(f"%{clean_query}%"), Task.description.ilike(f"%{clean_query}%")))
+    if project_id is not None:
+        filters.append(Task.project_id == project_id)
+    if task_status is not None:
+        filters.append(Task.status == task_status)
+    if assignee_id is not None:
+        filters.append(Task.assignees.any(User.id == assignee_id))
+    if priority is not None:
+        filters.append(Task.priority == priority)
+    if overdue:
+        filters.extend([Task.due_date.is_not(None), Task.due_date < date.today(), Task.status != TaskStatus.DONE])
+
+    count_statement = select(func.count(Task.id)).select_from(Task).join(Project)
+    if user.role == UserRole.MEMBER:
+        count_statement = count_statement.join(project_members)
+    total = session.scalar(count_statement.where(*filters)) or 0
+    if sort_by == "due_date":
+        null_due_dates_last = case((Task.due_date.is_(None), 1), else_=0).asc()
+        sort_column = Task.due_date
+        order_by = [null_due_dates_last, sort_column.asc() if sort_direction == "asc" else sort_column.desc()]
+    elif sort_by == "priority":
+        priority_rank = case(
+            (Task.priority == TaskPriority.LOW, 1),
+            (Task.priority == TaskPriority.MEDIUM, 2),
+            (Task.priority == TaskPriority.HIGH, 3),
+            (Task.priority == TaskPriority.CRITICAL, 4),
+            else_=0,
+        )
+        order_by = [priority_rank.asc() if sort_direction == "asc" else priority_rank.desc()]
+    else:
+        order_by = [Task.updated_at.asc() if sort_direction == "asc" else Task.updated_at.desc()]
+
+    tasks = list(
+        session.scalars(
+            _task_search_statement(user)
+            .where(*filters)
+            .options(selectinload(Task.project))
+            .order_by(*order_by, Task.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    )
+    return TaskSearchResponse(
+        items=tasks,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=ceil(total / page_size),
     )
 
 

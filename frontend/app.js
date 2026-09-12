@@ -66,6 +66,31 @@ function assignedTaskCard(task) {
   return `<article class="task assigned-task"><div class="task-heading"><div><span class="project-key">${escapeHtml(task.project_key)}</span><h3>${escapeHtml(task.title)}</h3></div><span class="task-status ${task.status.toLowerCase()}">${escapeHtml(statusLabel(task.status))}</span></div><p>${escapeHtml(task.project_name)}</p><small><b>Due:</b> ${task.due_date || 'No due date'}</small><button class="open-project secondary" data-project-id="${task.project_id}">Open project</button></article>`;
 }
 
+function taskSearchCard(task) {
+  return `<article class="task assigned-task"><div class="task-heading"><div><span class="project-key">${escapeHtml(task.project_key)}</span><h3>${escapeHtml(task.title)}</h3></div><div class="task-badges"><span class="task-status ${task.status.toLowerCase()}">${escapeHtml(statusLabel(task.status))}</span><span class="priority ${task.priority.toLowerCase()}">${escapeHtml(task.priority)}</span></div></div><p>${escapeHtml(task.project_name)} · ${escapeHtml(task.description || 'No description')}</p><small><b>Due:</b> ${task.due_date || 'No due date'} · <b>Assignees:</b> ${task.assignee_ids.length}</small><button class="open-project secondary" data-project-id="${task.project_id}">Open project</button></article>`;
+}
+
+function selected(value, current) {
+  return String(value) === String(current ?? '') ? 'selected' : '';
+}
+
+function filterUsers(projects, users) {
+  const people = new Map(users.map(person => [person.id, person]));
+  projects.flatMap(project => project.members).forEach(person => people.set(person.id, person));
+  return [...people.values()].sort((first, second) => first.name.localeCompare(second.name));
+}
+
+function taskSearchPath(filters) {
+  const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== '' && value !== null && value !== undefined));
+  return `/api/tasks?${params}`;
+}
+
+function taskSearchPanel(result, projects, users, filters) {
+  const pageStart = result.total ? ((result.page - 1) * result.page_size) + 1 : 0;
+  const pageEnd = Math.min(result.page * result.page_size, result.total);
+  return `<section class="panel"><h2>Find tasks</h2><form id="task-search" class="search-controls"><label>Search</label><input name="q" value="${escapeHtml(filters.q || '')}" placeholder="Title or description"><label>Project</label><select name="project_id"><option value="">All visible projects</option>${projects.map(project => `<option value="${project.id}" ${selected(project.id, filters.project_id)}>${escapeHtml(project.key)} · ${escapeHtml(project.name)}</option>`).join('')}</select><label>Status</label><select name="status"><option value="">Any status</option>${['BACKLOG', 'IN_PROGRESS', 'IN_REVIEW', 'BLOCKED', 'DONE'].map(taskStatus => `<option value="${taskStatus}" ${selected(taskStatus, filters.status)}>${statusLabel(taskStatus)}</option>`).join('')}</select><label>Assignee</label><select name="assignee_id"><option value="">Anyone</option>${users.map(person => `<option value="${person.id}" ${selected(person.id, filters.assignee_id)}>${escapeHtml(person.name)}</option>`).join('')}</select><label>Priority</label><select name="priority"><option value="">Any priority</option>${['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(priority => `<option value="${priority}" ${selected(priority, filters.priority)}>${priority}</option>`).join('')}</select><label>Due date</label><select name="overdue"><option value="">Any</option><option value="true" ${selected('true', filters.overdue)}>Overdue</option></select><label>Sort by</label><select name="sort_by"><option value="updated_at" ${selected('updated_at', filters.sort_by)}>Last updated</option><option value="due_date" ${selected('due_date', filters.sort_by)}>Due date</option><option value="priority" ${selected('priority', filters.sort_by)}>Priority</option></select><label>Direction</label><select name="sort_direction"><option value="desc" ${selected('desc', filters.sort_direction)}>Descending</option><option value="asc" ${selected('asc', filters.sort_direction)}>Ascending</option></select><button>Apply filters</button></form><p class="hint">Showing ${pageStart}–${pageEnd} of ${result.total} matching tasks.</p><div class="tasks">${result.items.length ? result.items.map(taskSearchCard).join('') : '<p class="hint">No tasks match these filters.</p>'}</div>${result.total_pages > 1 ? `<div class="pagination"><button class="task-page secondary" data-task-page="${result.page - 1}" ${result.page === 1 ? 'disabled' : ''}>Previous</button><span>Page ${result.page} of ${result.total_pages}</span><button class="task-page secondary" data-task-page="${result.page + 1}" ${result.page === result.total_pages ? 'disabled' : ''}>Next</button></div>` : ''}</section>`;
+}
+
 function taskCard(task, tasks, isManager, projectMembers) {
   const blockerNames = task.blocker_ids.map(id => tasks.find(candidate => candidate.id === id)?.title || `Task #${id}`).map(escapeHtml).join(', ');
   const assigneeNames = task.assignee_ids.map(id => projectMembers.find(member => member.id === id)?.name || `User #${id}`).map(escapeHtml).join(', ');
@@ -130,41 +155,55 @@ async function showProjectDetail(user, projectId, showArchived = false, error = 
   }
 }
 
-async function showHome(user, error = '', showArchived = false) {
+async function showHome(user, error = '', showArchived = false, searchFilters = {}) {
   try {
     const isManager = user.role === 'MANAGER';
-    const [projects, users, assignedTasks] = await Promise.all([
+    const taskFilters = { page: 1, page_size: 10, sort_by: 'updated_at', sort_direction: 'desc', ...searchFilters };
+    const [projects, users, assignedTasks, taskSearch] = await Promise.all([
       api(isManager && showArchived ? '/api/projects?include_archived=true' : '/api/projects'),
       isManager ? api('/api/users') : Promise.resolve([]),
-      api('/api/tasks/assigned')
+      api('/api/tasks/assigned'),
+      api(taskSearchPath(taskFilters))
     ]);
     const activeProjects = projects.filter(project => !project.archived);
     const archivedProjects = projects.filter(project => project.archived);
+    const people = filterUsers(activeProjects, users);
     const createProject = isManager ? `<section class="panel"><h2>Create project</h2><form id="create-project"><label>Key</label><input name="key" maxlength="12" placeholder="OPS" required><label>Name</label><input name="name" maxlength="160" required><label>Description</label><input name="description" maxlength="2000"><label>Owner</label><select name="ownerId">${users.map(person => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}</select><fieldset><legend>Project members</legend>${memberChoices(users, [])}</fieldset><button>Create project</button></form></section>` : '<p class="hint">You only see projects where you are a member.</p>';
     const archiveToggle = isManager ? `<button id="toggle-archived" class="secondary">${showArchived ? 'Hide archived projects' : 'Show archived projects'}</button>` : '';
     const archivedSection = showArchived ? `<section><h2>Archived projects</h2><div class="projects">${archivedProjects.length ? archivedProjects.map(project => projectCard(project, true, users)).join('') : '<p class="hint">No archived projects.</p>'}</div></section>` : '';
-    root.innerHTML = `<div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>Welcome, ${escapeHtml(user.name.split(' ')[0])}.</h1><span class="role">${isManager ? 'Manager' : 'Member'}</span></div><div class="header-actions">${archiveToggle}<button id="logout" class="secondary">Sign out</button></div></div>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<section><h2>Assigned to you</h2><div class="tasks">${assignedTasks.length ? assignedTasks.map(assignedTaskCard).join('') : '<p class="hint">No tasks are assigned to you.</p>'}</div></section>${createProject}<section><h2>${isManager ? 'All active projects' : 'Your projects'}</h2><div class="projects">${activeProjects.length ? activeProjects.map(project => projectCard(project, isManager, users)).join('') : '<p class="hint">No active projects yet.</p>'}</div></section>${archivedSection}`;
+    root.innerHTML = `<div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>Welcome, ${escapeHtml(user.name.split(' ')[0])}.</h1><span class="role">${isManager ? 'Manager' : 'Member'}</span></div><div class="header-actions">${archiveToggle}<button id="logout" class="secondary">Sign out</button></div></div>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}${taskSearchPanel(taskSearch, activeProjects, people, taskFilters)}<section><h2>Assigned to you</h2><div class="tasks">${assignedTasks.length ? assignedTasks.map(assignedTaskCard).join('') : '<p class="hint">No tasks are assigned to you.</p>'}</div></section>${createProject}<section><h2>${isManager ? 'All active projects' : 'Your projects'}</h2><div class="projects">${activeProjects.length ? activeProjects.map(project => projectCard(project, isManager, users)).join('') : '<p class="hint">No active projects yet.</p>'}</div></section>${archivedSection}`;
     document.querySelector('#logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }); localStorage.removeItem(tokenKey); showLogin(); };
+    document.querySelector('#task-search').onsubmit = event => {
+      event.preventDefault();
+      const values = new FormData(event.currentTarget);
+      showHome(user, '', showArchived, {
+        q: values.get('q'), project_id: values.get('project_id'), status: values.get('status'), assignee_id: values.get('assignee_id'),
+        priority: values.get('priority'), overdue: values.get('overdue'), sort_by: values.get('sort_by'), sort_direction: values.get('sort_direction'), page: 1, page_size: 10
+      });
+    };
+    document.querySelectorAll('.task-page').forEach(button => {
+      button.onclick = () => showHome(user, '', showArchived, { ...taskFilters, page: Number(button.dataset.taskPage) });
+    });
     document.querySelectorAll('.open-project').forEach(button => {
       button.onclick = () => showProjectDetail(user, button.dataset.projectId, showArchived);
     });
-    if (isManager) bindManagerControls(user, showArchived);
+    if (isManager) bindManagerControls(user, showArchived, taskFilters);
   } catch (reason) {
     localStorage.removeItem(tokenKey);
     showLogin(reason.message);
   }
 }
 
-function bindManagerControls(user, showArchived) {
-  document.querySelector('#toggle-archived').onclick = () => showHome(user, '', !showArchived);
+function bindManagerControls(user, showArchived, taskFilters) {
+  document.querySelector('#toggle-archived').onclick = () => showHome(user, '', !showArchived, taskFilters);
   document.querySelector('#create-project').onsubmit = async event => {
     event.preventDefault();
     const form = event.currentTarget;
     const values = new FormData(form);
     try {
       await api('/api/projects', { method: 'POST', body: JSON.stringify({ key: values.get('key'), name: values.get('name'), description: values.get('description'), owner_id: Number(values.get('ownerId')), member_ids: values.getAll('memberIds').map(Number) }) });
-      showHome(user, '', showArchived);
-    } catch (reason) { showHome(user, reason.message, showArchived); }
+      showHome(user, '', showArchived, taskFilters);
+    } catch (reason) { showHome(user, reason.message, showArchived, taskFilters); }
   };
   document.querySelectorAll('.edit-project-form').forEach(form => {
     form.onsubmit = async event => {
@@ -172,8 +211,8 @@ function bindManagerControls(user, showArchived) {
       const values = new FormData(form);
       try {
         await api(`/api/projects/${form.dataset.projectId}`, { method: 'PUT', body: JSON.stringify({ key: values.get('key'), name: values.get('name'), description: values.get('description'), owner_id: Number(values.get('ownerId')) }) });
-        showHome(user, '', showArchived);
-      } catch (reason) { showHome(user, reason.message, showArchived); }
+        showHome(user, '', showArchived, taskFilters);
+      } catch (reason) { showHome(user, reason.message, showArchived, taskFilters); }
     };
   });
   document.querySelectorAll('.members-form').forEach(form => {
@@ -182,24 +221,24 @@ function bindManagerControls(user, showArchived) {
       const values = new FormData(form);
       try {
         await api(`/api/projects/${form.dataset.projectId}/members`, { method: 'PUT', body: JSON.stringify({ member_ids: values.getAll('memberIds').map(Number) }) });
-        showHome(user, '', showArchived);
-      } catch (reason) { showHome(user, reason.message, showArchived); }
+        showHome(user, '', showArchived, taskFilters);
+      } catch (reason) { showHome(user, reason.message, showArchived, taskFilters); }
     };
   });
   document.querySelectorAll('.archive').forEach(button => {
     button.onclick = async () => {
       try {
         await api(`/api/projects/${button.dataset.projectId}/archive`, { method: 'POST' });
-        showHome(user, '', showArchived);
-      } catch (reason) { showHome(user, reason.message, showArchived); }
+        showHome(user, '', showArchived, taskFilters);
+      } catch (reason) { showHome(user, reason.message, showArchived, taskFilters); }
     };
   });
   document.querySelectorAll('.restore').forEach(button => {
     button.onclick = async () => {
       try {
         await api(`/api/projects/${button.dataset.projectId}/restore`, { method: 'POST' });
-        showHome(user, '', showArchived);
-      } catch (reason) { showHome(user, reason.message, showArchived); }
+        showHome(user, '', showArchived, taskFilters);
+      } catch (reason) { showHome(user, reason.message, showArchived, taskFilters); }
     };
   });
 }

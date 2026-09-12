@@ -232,3 +232,91 @@ class TaskTests(unittest.TestCase):
             {task["id"], second_task["id"]},
         )
         self.assertEqual(self.client.get("/api/tasks/assigned", headers=self.headers(self.priya)).json(), [])
+
+    def test_task_search_filters_sorts_paginates_and_respects_visibility(self) -> None:
+        operations = self.create_project(
+            "OPS",
+            self.dan["user"]["id"],
+            [self.dan["user"]["id"], self.priya["user"]["id"]],
+        )
+        private_web = self.create_project("WEB", self.priya["user"]["id"], [self.priya["user"]["id"]])
+        overdue_task = self.create_task(
+            operations["id"],
+            {
+                "title": "Quarterly review notes",
+                "description": "Customer research summary.",
+                "priority": "LOW",
+                "due_date": "2020-01-01",
+                "assignee_ids": [self.dan["user"]["id"]],
+            },
+            self.dan,
+        )
+        critical_task = self.create_task(
+            operations["id"],
+            {
+                "title": "Launch proposal",
+                "description": "Prepare final client proposal.",
+                "priority": "CRITICAL",
+                "due_date": "2030-01-01",
+                "assignee_ids": [self.priya["user"]["id"]],
+            },
+            self.dan,
+        )
+        in_progress_task = self.create_task(
+            operations["id"],
+            {
+                "title": "Research brief",
+                "description": "Needle in the shared project description.",
+                "priority": "HIGH",
+                "assignee_ids": [self.dan["user"]["id"]],
+            },
+            self.dan,
+        )
+        self.move_task(in_progress_task["id"], "IN_PROGRESS", self.dan)
+        private_task = self.create_task(
+            private_web["id"],
+            {
+                "title": "Needle in a private project",
+                "description": "Not visible to Dan.",
+                "priority": "MEDIUM",
+                "assignee_ids": [self.priya["user"]["id"]],
+            },
+        )
+
+        def search(session: dict, **params: str | int | bool) -> dict:
+            response = self.client.get("/api/tasks", headers=self.headers(session), params=params)
+            self.assertEqual(response.status_code, 200)
+            return response.json()
+
+        text_search = search(self.dan, q="needle")
+        self.assertEqual(text_search["total"], 1)
+        self.assertEqual(text_search["items"][0]["id"], in_progress_task["id"])
+        self.assertEqual(search(self.dan, project_id=private_web["id"])["total"], 0)
+        self.assertEqual(search(self.dan, status="IN_PROGRESS")["items"][0]["id"], in_progress_task["id"])
+        self.assertEqual(
+            {task["id"] for task in search(self.dan, assignee_id=self.dan["user"]["id"])["items"]},
+            {overdue_task["id"], in_progress_task["id"]},
+        )
+        self.assertEqual(search(self.dan, priority="CRITICAL")["items"][0]["id"], critical_task["id"])
+        self.assertEqual(search(self.dan, overdue=True)["items"][0]["id"], overdue_task["id"])
+
+        priority_sorted = search(self.dan, sort_by="priority", sort_direction="desc")
+        self.assertEqual([task["priority"] for task in priority_sorted["items"]], ["CRITICAL", "HIGH", "LOW"])
+        due_sorted = search(self.dan, sort_by="due_date", sort_direction="asc")
+        self.assertEqual([task["id"] for task in due_sorted["items"]], [overdue_task["id"], critical_task["id"], in_progress_task["id"]])
+        second_page = search(self.dan, page=2, page_size=2)
+        self.assertEqual(second_page["total"], 3)
+        self.assertEqual(second_page["total_pages"], 2)
+        self.assertEqual(len(second_page["items"]), 1)
+
+        manager_text_search = search(self.manager, q="needle")
+        self.assertEqual({task["id"] for task in manager_text_search["items"]}, {in_progress_task["id"], private_task["id"]})
+
+        # Finder results are default-view results: archiving a project must hide all
+        # of its tasks without removing their data from the database.
+        archived = self.client.post(
+            f"/api/projects/{operations['id']}/archive",
+            headers=self.headers(self.manager),
+        )
+        self.assertEqual(archived.status_code, 200)
+        self.assertEqual(search(self.dan)["total"], 0)

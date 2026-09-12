@@ -39,3 +39,11 @@ class TaskResponse(BaseModel):
 class AssignedTaskResponse(TaskResponse):
     project_key: str
     project_name: str
+
+
+class TaskSearchResponse(BaseModel):
+    items: list[AssignedTaskResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
