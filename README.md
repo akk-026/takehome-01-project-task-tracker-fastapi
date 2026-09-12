@@ -23,6 +23,11 @@ server applies the normal rules independently to each task and returns a success
 for every selected item; valid changes are not rolled back because another item was invalid. The
 currently filtered finder results can also be exported as a server-generated CSV file.
 
+The landing dashboard is an authenticated, visibility-scoped server summary. It shows open,
+overdue, due-this-week, and completed-this-week totals; task counts by status and assignee; and an
+eight-week completion chart. Tasks store their completion timestamp when they move to Done, so later
+edits do not alter completion reporting.
+
 ## Run locally
 
 ```sh

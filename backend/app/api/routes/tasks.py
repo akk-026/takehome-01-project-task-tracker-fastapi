@@ -1,5 +1,5 @@
 import csv
-from datetime import date
+from datetime import date, datetime, timezone
 from io import StringIO
 from math import ceil
 from typing import Literal
@@ -179,6 +179,7 @@ def _move_task(task: Task, target_status: TaskStatus) -> None:
         )
     task.blocked_from = task.status if target_status == TaskStatus.BLOCKED else None
     task.status = target_status
+    task.completed_at = datetime.now(timezone.utc) if target_status == TaskStatus.DONE else None
 
 
 @router.get("/projects/{project_id}", response_model=list[TaskResponse])

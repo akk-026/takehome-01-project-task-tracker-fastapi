@@ -95,6 +95,63 @@ function priorityBadge(task) {
   return `<span class="priority ${task.priority.toLowerCase()}">${escapeHtml(task.priority)}</span>`;
 }
 
+function dashboardMetric(label, value, detail) {
+  return `
+    <article class="dashboard-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${value}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </article>
+  `;
+}
+
+function chartRows(items, labelFor, countFor) {
+  const maximum = Math.max(...items.map(countFor), 1);
+  return items.map(item => {
+    const count = countFor(item);
+    return `
+      <div class="chart-row">
+        <span>${escapeHtml(labelFor(item))}</span>
+        <div class="chart-track"><i style="width: ${Math.round((count / maximum) * 100)}%"></i></div>
+        <b>${count}</b>
+      </div>
+    `;
+  }).join('');
+}
+
+function weekLabel(week) {
+  const start = new Date(`${week.week_start}T00:00:00`);
+  return start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function dashboardPanel(dashboard) {
+  const metrics = dashboard.counts;
+  const completionMaximum = Math.max(...dashboard.completions.map(week => week.completed), 1);
+  const completionBars = dashboard.completions.map(week => `
+    <div class="completion-column" title="Week of ${escapeHtml(week.week_start)}: ${week.completed} completed">
+      <span>${week.completed || ''}</span>
+      <i style="height: ${Math.max(6, Math.round((week.completed / completionMaximum) * 100))}%"></i>
+      <small>${escapeHtml(weekLabel(week))}</small>
+    </div>
+  `).join('');
+  return `
+    <section class="dashboard" aria-label="Task dashboard">
+      <div class="section-heading"><div><h2>Dashboard</h2><p class="hint">A live view of active work across projects you can access.</p></div></div>
+      <div class="dashboard-metrics">
+        ${dashboardMetric('Open tasks', metrics.open_tasks, 'Not yet completed')}
+        ${dashboardMetric('Overdue', metrics.overdue_tasks, 'Open and past due')}
+        ${dashboardMetric('Due this week', metrics.due_this_week, 'Open tasks through Sunday')}
+        ${dashboardMetric('Completed this week', metrics.completed_this_week, 'Completed since Monday')}
+      </div>
+      <div class="dashboard-charts">
+        <section class="dashboard-chart"><h3>Tasks by status</h3>${chartRows(dashboard.by_status, item => statusLabel(item.status), item => item.count)}</section>
+        <section class="dashboard-chart"><h3>Tasks by assignee</h3>${dashboard.by_assignee.length ? chartRows(dashboard.by_assignee, item => item.name, item => item.count) : '<p class="hint">No active tasks yet.</p>'}</section>
+        <section class="dashboard-chart completion-chart"><h3>Completions · last 8 weeks</h3><div class="completion-bars">${completionBars}</div></section>
+      </div>
+    </section>
+  `;
+}
+
 function projectCard(project, isManager, users) {
   const members = project.members.map(member => escapeHtml(member.name)).join(', ') || 'No members';
   const owners = users.map(person => `
@@ -479,11 +536,12 @@ async function showHome(user, options = {}) {
   try {
     const isManager = user.role === 'MANAGER';
     const taskFilters = { ...defaultTaskFilters, ...searchFilters };
-    const [projects, users, assignedTasks, taskSearch] = await Promise.all([
+    const [projects, users, assignedTasks, taskSearch, dashboard] = await Promise.all([
       api(isManager && showArchived ? '/api/projects?include_archived=true' : '/api/projects'),
       isManager ? api('/api/users') : Promise.resolve([]),
       api('/api/tasks/assigned'),
-      api(taskSearchPath(taskFilters))
+      api(taskSearchPath(taskFilters)),
+      api('/api/dashboard')
     ]);
     const activeProjects = projects.filter(project => !project.archived);
     const archivedProjects = projects.filter(project => project.archived);
@@ -494,6 +552,7 @@ async function showHome(user, options = {}) {
     root.innerHTML = `
       <div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>Welcome, ${escapeHtml(user.name.split(' ')[0])}.</h1><span class="role">${isManager ? 'Manager' : 'Member'}</span></div><div class="header-actions">${archiveToggle}<button id="logout" class="secondary">Sign out</button></div></div>
       ${errorMessage(error)}
+      ${dashboardPanel(dashboard)}
       ${taskSearchPanel(taskSearch, activeProjects, people, taskFilters, bulkResult)}
       <section><h2>Assigned to you</h2><div class="tasks">${assignedTasks.length ? assignedTasks.map(assignedTaskCard).join('') : '<p class="hint">No tasks are assigned to you.</p>'}</div></section>
       ${projectCreation}

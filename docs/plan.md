@@ -13,7 +13,9 @@ tested independently.
 7. Add bulk actions with isolated per-task outcomes and a server-side CSV export of the current finder
    filters. Refactor the frontend from compact single-line templates into named rendering and event
    functions so follow-on work is easier to change safely.
+8. Add the authenticated dashboard summary, persist completion timestamps through lifecycle changes,
+   and cover manager/member visibility plus calendar-week reporting with automated tests.
 
-The next sessions will cover the dashboard, immutable history/comments, and overdue alerts. I have
-not estimated those as complete work; they remain intentionally out of scope rather than being shown
-as partially finished features.
+The next sessions will cover immutable history/comments and overdue alerts. I have not estimated
+those as complete work; they remain intentionally out of scope rather than being shown as partially
+finished features.

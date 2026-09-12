@@ -17,6 +17,11 @@ The task finder and CSV export use the same server-side filter, visibility, and 
 The browser receives a single page of JSON for the finder, while CSV export creates every currently
 filtered visible result on the server. No browser-side filtering of a full task collection is used.
 
-I deliberately have not built invitations, password reset, real-time collaboration, dashboard
-analytics, immutable task history, alerts, or deployment yet. Those cover later requirements and
-are kept out of the current scope while the first seven features are completed and tested.
+The dashboard is another authenticated server-side summary. It scopes active tasks to the current
+user's visible projects, calculates headline totals and status/assignee breakdowns, then returns
+eight calendar-week completion buckets. A task records `completed_at` whenever it enters Done, so
+completion reporting does not change when a finished task is later edited.
+
+I deliberately have not built invitations, password reset, real-time collaboration, immutable task
+history, alerts, or deployment yet. Those cover later requirements and are kept out of the current
+scope while the first eight features are completed and tested.

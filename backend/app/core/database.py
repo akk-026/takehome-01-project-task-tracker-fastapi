@@ -33,6 +33,7 @@ def _migrate_legacy_tasks() -> None:
         "status": "VARCHAR(15) NOT NULL DEFAULT 'BACKLOG'",
         "blocked_from": "VARCHAR(15)",
         "updated_at": "DATETIME",
+        "completed_at": "DATETIME",
     }
     with engine.begin() as connection:
         for name, definition in additions.items():
@@ -40,3 +41,5 @@ def _migrate_legacy_tasks() -> None:
                 connection.execute(text(f"ALTER TABLE tasks ADD COLUMN {name} {definition}"))
         if "updated_at" not in columns:
             connection.execute(text("UPDATE tasks SET updated_at = created_at WHERE updated_at IS NULL"))
+        if "completed_at" not in columns:
+            connection.execute(text("UPDATE tasks SET completed_at = updated_at WHERE status = 'DONE'"))

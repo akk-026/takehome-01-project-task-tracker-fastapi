@@ -35,6 +35,7 @@ class TaskResponse(BaseModel):
     available_statuses: list[TaskStatus]
     created_at: datetime
     updated_at: datetime
+    completed_at: datetime | None
 
 
 class AssignedTaskResponse(TaskResponse):

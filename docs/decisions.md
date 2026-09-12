@@ -48,3 +48,19 @@
 - **Changed to:** Named template, payload, download, and event-binding functions.
 - **Why:** The compact version was quick to begin with but had long lines that made Feature 7 harder
   to extend and review. The refactor keeps the no-build frontend while making responsibilities clear.
+
+## 8. Store completion time separately from update time
+
+- **Chose:** Set `completed_at` when a task enters Done and clear it if the task is reopened.
+- **Rejected:** Treating `updated_at` as a completion timestamp.
+- **Why:** Finished tasks can be edited after completion. A separate timestamp makes the eight-week
+  completion chart and completed-this-week total stable and truthful.
+
+## 9. Return one visibility-scoped dashboard summary
+
+- **Chose:** Calculate dashboard totals, breakdowns, and calendar-week buckets in one authenticated
+  API response using only active projects the viewer can access.
+- **Rejected:** Loading every task in the browser and aggregating there, or exposing manager-wide
+  figures to regular members.
+- **Why:** It protects project visibility, keeps the dashboard compact, and makes all displayed
+  values come from a single consistent server-side snapshot.
