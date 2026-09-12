@@ -1,55 +1,45 @@
-# Northstar Project Tracker · FastAPI rebuild
+# Northstar Project Tracker
 
-A clean rebuild of the project-tracking assignment. The backend uses FastAPI and SQLAlchemy with a
-SQLite database for local development; the frontend remains dependency-free JavaScript. Feature 1
-includes server-enforced manager/member permissions: only managers can create or archive projects,
-replace a project's membership, or delete a task. Members only receive projects they belong to.
-Managers can also edit project details and restore archived projects; archived projects are omitted
-from the default project list without deleting their records.
-Tasks live inside one project and include descriptions, priorities, optional due dates, and
-same-project blockers. Project members can create and edit tasks; only managers can delete them.
-Tasks begin in Backlog and advance through In Progress, In Review, and Done. They may be blocked
-from either active state and return to that state when unblocked; reopening a completed task returns
-it to In Progress. The API supplies each task's currently legal next moves, while independently
-rejecting invalid transitions and completion with unfinished blockers.
-Tasks also support multiple assignees, limited to the task's project members. Each person's home
-view includes all of their assigned tasks across projects; removing a member from a project clears
-their assignments in that project.
-The task finder performs all cross-project search, filtering, sorting and pagination in FastAPI.
-It supports title/description search plus project, status, assignee, priority and overdue filters,
-and returns the total matching count with every page.
-Selected finder tasks can receive one bulk status, assignee-replacement, or due-date change. The
-server applies the normal rules independently to each task and returns a success or rejection reason
-for every selected item; valid changes are not rolled back because another item was invalid. The
-currently filtered finder results can also be exported as a server-generated CSV file.
+Northstar is an internal project and task tracker for teams managing client work across several
+projects. It is built with FastAPI, SQLAlchemy, and SQLite, with a dependency-free JavaScript
+frontend served by the API.
 
-The landing dashboard is an authenticated, visibility-scoped server summary. It shows open,
-overdue, due-this-week, and completed-this-week totals; task counts by status and assignee; and an
-eight-week completion chart. Tasks store their completion timestamp when they move to Done, so later
-edits do not alter completion reporting.
+## What is implemented
 
-Every task includes an append-only timeline for creation, field and status changes, assignments,
-unassignments, and comments. Each event records the actor and before/after values where relevant.
-Comments are timeline entries and cannot be edited or deleted, including by managers.
-
-The header alert badge shows each person's currently overdue assigned tasks. An alert can be
-dismissed by its assignee; changing that task's due date restores the alert for every assignee.
-
-The optional project board groups tasks into the five lifecycle states. A task may be dragged only
-to a highlighted legal next state; the drop is sent to the normal status endpoint, so permission,
-lifecycle, and unfinished-blocker checks still happen on the server. The detailed task list beneath
-the board retains the accessible button controls for each available move.
+- **Accounts and roles:** Managers and members sign in with separate, server-enforced permissions.
+  Members only see projects they belong to; managers can manage projects, membership, and task
+  deletion.
+- **Projects and tasks:** Projects have a key, owner, membership, archive/restore support, and a
+  task list. Tasks support descriptions, priorities, optional due dates, blockers, and multiple
+  assignees.
+- **Task lifecycle:** Tasks move through Backlog, In Progress, In Review, Done, and Blocked.
+  FastAPI validates every move, including blocking completion when unfinished dependencies remain.
+- **Task discovery and bulk actions:** The server provides visibility-scoped search, filters,
+  sorting, pagination, CSV export, and per-task results for bulk status, assignee, and due-date
+  updates.
+- **Dashboard and alerts:** The home view shows workload metrics, task breakdowns, an eight-week
+  completion chart, and overdue alerts that assignees can dismiss. Revising a due date restores a
+  dismissed alert.
+- **Immutable history:** Each task has an append-only timeline of creation, edits, status changes,
+  assignment changes, and comments.
+- **Project board:** The optional drag-and-drop board organizes tasks by lifecycle state. It only
+  highlights valid next states, and every drop is sent through the same server-side lifecycle
+  validation as the regular task controls.
 
 ## Run locally
+
+From the repository root:
 
 ```sh
 cd backend
 ../.venv/bin/uvicorn app.main:app --reload
 ```
 
-Open the app at [http://localhost:8000](http://localhost:8000). The API health check is available at
-[http://localhost:8000/api/health](http://localhost:8000/api/health). If you serve `frontend/` with
-another local server on port 3000, it will use the FastAPI API on port 8000 automatically.
+Open [http://localhost:8000](http://localhost:8000). The health check is available at
+[http://localhost:8000/api/health](http://localhost:8000/api/health).
+
+On first start, SQLite creates the schema and the demo accounts below. Projects and tasks can then
+be created in the application; the database file is local-only and ignored by Git.
 
 ## Test
 
