@@ -35,6 +35,11 @@ Comments are timeline entries and cannot be edited or deleted, including by mana
 The header alert badge shows each person's currently overdue assigned tasks. An alert can be
 dismissed by its assignee; changing that task's due date restores the alert for every assignee.
 
+The optional project board groups tasks into the five lifecycle states. A task may be dragged only
+to a highlighted legal next state; the drop is sent to the normal status endpoint, so permission,
+lifecycle, and unfinished-blocker checks still happen on the server. The detailed task list beneath
+the board retains the accessible button controls for each available move.
+
 ## Run locally
 
 ```sh

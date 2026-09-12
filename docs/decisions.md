@@ -81,3 +81,12 @@
 - **Rejected:** A global task-level dismissal, or retaining a dismissal if a deadline is revised.
 - **Why:** Each assignee needs independent control over their alert. A changed due date represents a
   new commitment, so the alert must reliably return for everyone rather than being hidden by stale state.
+
+## 12. Build the board on the existing lifecycle endpoint
+
+- **Chose:** Native browser drag-and-drop in the project view, using the API-provided legal next
+  statuses to highlight valid columns and the existing single-task status endpoint for the drop.
+- **Rejected:** A board-specific status endpoint or client-side transition rules.
+- **Why:** The board stays a small presentation layer. It cannot bypass the server's permission,
+  blocker, and lifecycle validation, and the detailed list keeps explicit button controls for
+  keyboard users.

@@ -19,5 +19,7 @@ tested independently.
    server transaction, and add comments without any edit or delete capability.
 10. Add personal overdue alerts, a navigation count badge, dismissal controls, and deadline-change
     restoration backed by a per-user dismissal table.
+11. Add the optional project board with native drag-and-drop, reusing the server's legal transition
+    data and single-task status endpoint rather than creating a second lifecycle path.
 
-All ten required features are now planned and implemented in focused, independently testable commits.
+All ten required features and the optional board are implemented in focused, independently testable commits.

@@ -5,6 +5,7 @@ const apiBaseUrl = window.location.port === '8000' ? '' : 'http://localhost:8000
 const statuses = ['BACKLOG', 'IN_PROGRESS', 'IN_REVIEW', 'BLOCKED', 'DONE'];
 const priorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const defaultTaskFilters = { page: 1, page_size: 10, sort_by: 'updated_at', sort_direction: 'desc' };
+let activeBoardTask = null;
 
 function authHeaders() {
   const token = localStorage.getItem(tokenKey);
@@ -247,6 +248,47 @@ function statusControls(task) {
     </button>
   `).join('');
   return `<div class="status-actions">${buttons}</div>`;
+}
+
+function boardTaskCard(task, members) {
+  const assignees = task.assignee_ids
+    .map(id => members.find(member => member.id === id)?.name || `User #${id}`)
+    .map(escapeHtml)
+    .join(', ');
+  const legalMoves = task.available_statuses.map(statusLabel).join(', ');
+  const canMove = task.available_statuses.length > 0;
+  return `
+    <article class="board-task" data-task-id="${task.id}" draggable="${canMove}" aria-label="${escapeHtml(task.title)}. ${escapeHtml(statusLabel(task.status))}. ${canMove ? `Can move to ${legalMoves}.` : 'No status moves available.'}">
+      <div class="board-task-heading"><h3>${escapeHtml(task.title)}</h3>${priorityBadge(task)}</div>
+      <p>${escapeHtml(task.description || 'No description yet.')}</p>
+      <dl class="board-task-meta">
+        <div><dt>Due</dt><dd>${escapeHtml(task.due_date || 'No due date')}</dd></div>
+        <div><dt>Assigned</dt><dd>${assignees || 'Nobody'}</dd></div>
+      </dl>
+      <small class="board-drag-hint">${canMove ? `Drag to: ${escapeHtml(legalMoves)}` : 'No legal move available'}</small>
+    </article>
+  `;
+}
+
+function projectBoard(tasks, members) {
+  const columns = statuses.map(status => {
+    const columnTasks = tasks.filter(task => task.status === status);
+    return `
+      <section class="board-column" data-status="${status}" aria-label="${escapeHtml(statusLabel(status))} column">
+        <header><h3>${escapeHtml(statusLabel(status))}</h3><span>${columnTasks.length}</span></header>
+        <div class="board-dropzone" data-status="${status}">
+          ${columnTasks.length ? columnTasks.map(task => boardTaskCard(task, members)).join('') : '<p class="board-empty">Drop a task here</p>'}
+        </div>
+      </section>
+    `;
+  }).join('');
+  return `
+    <section class="project-board" aria-labelledby="board-heading">
+      <div class="section-heading"><div><h2 id="board-heading">Board</h2><p class="hint">Drag a task to one of its highlighted legal next states. Every move is checked by the server.</p></div></div>
+      <div class="board" aria-live="polite">${columns}</div>
+      <p class="hint board-accessibility-note">For keyboard status changes, use the move buttons in the detailed task list below.</p>
+    </section>
+  `;
 }
 
 function displayTimelineValue(value) {
@@ -538,18 +580,19 @@ async function showProjectDetail(user, projectId, options = {}) {
       </div>
       ${errorMessage(error)}
       ${createTaskPanel(project, tasks)}
+      ${projectBoard(tasks, project.members)}
       <section>
-        <h2>Tasks</h2>
+        <h2>Detailed task list</h2>
         <div class="tasks">${tasks.length ? tasks.map(task => taskCard(task, tasks, user.role === 'MANAGER', project.members, timelines.get(task.id) || [])).join('') : '<p class="hint">No tasks in this project yet.</p>'}</div>
       </section>
     `;
-    bindProjectEvents(user, projectId, showArchived);
+    bindProjectEvents(user, projectId, showArchived, tasks);
   } catch (reason) {
     showHome(user, { error: reason.message, showArchived });
   }
 }
 
-function bindProjectEvents(user, projectId, showArchived) {
+function bindProjectEvents(user, projectId, showArchived, tasks) {
   document.querySelector('#back-to-projects').onclick = () => showHome(user, { showArchived });
   document.querySelector('#create-task').onsubmit = async event => {
     event.preventDefault();
@@ -581,6 +624,7 @@ function bindProjectEvents(user, projectId, showArchived) {
       }
     };
   });
+  bindBoardEvents(user, projectId, showArchived, tasks);
   document.querySelectorAll('.delete-task').forEach(button => {
     button.onclick = async () => {
       try {
@@ -604,6 +648,71 @@ function bindProjectEvents(user, projectId, showArchived) {
         showProjectDetail(user, projectId, { showArchived, error: reason.message });
       }
     };
+  });
+}
+
+function clearBoardDragState() {
+  activeBoardTask = null;
+  document.querySelectorAll('.board-task').forEach(card => card.classList.remove('is-dragging'));
+  document.querySelectorAll('.board-column').forEach(column => {
+    column.classList.remove('drop-allowed', 'drop-active', 'is-updating');
+    column.removeAttribute('aria-dropeffect');
+  });
+}
+
+function bindBoardEvents(user, projectId, showArchived, tasks) {
+  const taskById = new Map(tasks.map(task => [task.id, { ...task, availableStatuses: task.available_statuses }]));
+
+  document.querySelectorAll('.board-task[draggable="true"]').forEach(card => {
+    card.addEventListener('dragstart', event => {
+      activeBoardTask = taskById.get(Number(card.dataset.taskId));
+      if (!activeBoardTask) return;
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(activeBoardTask.id));
+      card.classList.add('is-dragging');
+      document.querySelectorAll('.board-column').forEach(column => {
+        if (activeBoardTask.availableStatuses.includes(column.dataset.status)) {
+          column.classList.add('drop-allowed');
+          column.setAttribute('aria-dropeffect', 'move');
+        }
+      });
+    });
+    card.addEventListener('dragend', clearBoardDragState);
+  });
+
+  document.querySelectorAll('.board-column').forEach(column => {
+    const canReceive = () => activeBoardTask?.availableStatuses.includes(column.dataset.status);
+    column.addEventListener('dragover', event => {
+      if (!canReceive()) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    });
+    column.addEventListener('dragenter', event => {
+      if (!canReceive()) return;
+      event.preventDefault();
+      column.classList.add('drop-active');
+    });
+    column.addEventListener('dragleave', event => {
+      if (!column.contains(event.relatedTarget)) column.classList.remove('drop-active');
+    });
+    column.addEventListener('drop', async event => {
+      if (!canReceive()) return;
+      event.preventDefault();
+      const task = activeBoardTask;
+      const targetStatus = column.dataset.status;
+      column.classList.add('is-updating');
+      try {
+        await api(`/api/tasks/${task.id}/status`, {
+          method: 'POST',
+          body: JSON.stringify({ status: targetStatus })
+        });
+        clearBoardDragState();
+        showProjectDetail(user, projectId, { showArchived });
+      } catch (reason) {
+        clearBoardDragState();
+        showProjectDetail(user, projectId, { showArchived, error: reason.message });
+      }
+    });
   });
 }
 
