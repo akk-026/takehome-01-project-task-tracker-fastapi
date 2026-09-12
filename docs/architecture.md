@@ -1,10 +1,17 @@
 # Architecture
 
-Northstar is a small FastAPI application backed by SQLAlchemy and SQLite. FastAPI serves the JSON
-API and the dependency-free browser client from the same local process. The browser stores a bearer
-session token in local storage and sends it with each request. The API loads the authenticated user,
-applies role and project-visibility rules, changes the database in a transaction, then returns JSON
-or a CSV download.
+Northstar is a small FastAPI application backed by SQLAlchemy. SQLite is the local-development
+database; a hosted PostgreSQL database is used when deploying. FastAPI serves the JSON API and the
+dependency-free browser client from the same process. The browser stores a bearer session token in
+local storage and sends it with each request. The API loads the authenticated user, applies role and
+project-visibility rules, changes the database in a transaction, then returns JSON or a CSV download.
+
+For Vercel, `api/index.py` exposes the existing FastAPI application as the serverless entrypoint and
+`vercel.json` rewrites requests to it while including the backend and frontend files in the function
+bundle. The frontend uses same-origin API paths in a deployment, so the browser client and API share
+one URL. `NORTHSTAR_DATABASE_URL` supplies the hosted Postgres connection string; the database layer
+normalizes standard Postgres URLs to SQLAlchemy's psycopg driver. This preserves SQLite's convenience
+for local development without relying on Vercel's non-persistent filesystem.
 
 For example, a bulk status update begins when someone selects finder results and chooses a target
 status. The browser sends one `POST /api/tasks/bulk` request containing the selected task IDs and
@@ -31,5 +38,5 @@ The overdue alert endpoint is scoped to the current user's assigned tasks. It fi
 that are past due and unfinished, excluding that user's dismissal records. A due-date write deletes
 all dismissal records for the task in the same transaction, making its revised deadline visible again.
 
-I deliberately have not built invitations, password reset, real-time collaboration, or deployment
-yet. Those are kept out of the current scope while all ten required features are completed and tested.
+I deliberately have not built invitations, password reset, or real-time collaboration. They are kept
+out of scope while the required features, deployment configuration, and test coverage remain focused.

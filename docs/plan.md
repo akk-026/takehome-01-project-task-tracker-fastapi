@@ -21,5 +21,9 @@ tested independently.
     restoration backed by a per-user dismissal table.
 11. Add the optional project board with native drag-and-drop, reusing the server's legal transition
     data and single-task status endpoint rather than creating a second lifecycle path.
+12. Prepare a Vercel deployment entrypoint and route all browser requests through the existing
+    FastAPI application. Keep SQLite for local use while adding a hosted Postgres configuration for
+    deployment.
 
-All ten required features and the optional board are implemented in focused, independently testable commits.
+All ten required features, the optional board, and a Vercel-ready deployment configuration are
+implemented in focused, independently testable commits.

@@ -1,6 +1,9 @@
 const root = document.querySelector('#app');
 const tokenKey = 'northstar-token';
-const apiBaseUrl = window.location.port === '8000' ? '' : 'http://localhost:8000';
+// Local static development uses FastAPI on port 8000; deployed builds use the same origin.
+const apiBaseUrl = window.location.hostname === 'localhost' && window.location.port === '3000'
+  ? 'http://localhost:8000'
+  : '';
 
 const statuses = ['BACKLOG', 'IN_PROGRESS', 'IN_REVIEW', 'BLOCKED', 'DONE'];
 const priorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];

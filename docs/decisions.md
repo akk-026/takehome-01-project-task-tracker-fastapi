@@ -90,3 +90,12 @@
 - **Why:** The board stays a small presentation layer. It cannot bypass the server's permission,
   blocker, and lifecycle validation, and the detailed list keeps explicit button controls for
   keyboard users.
+
+## 13. Use hosted Postgres for a serverless deployment
+
+- **Chose:** Keep SQLite for local development and configure SQLAlchemy to use hosted Postgres in
+  Vercel through an environment variable.
+- **Rejected:** Shipping the SQLite file with the Vercel Function or relying on its local filesystem
+  for live application data.
+- **Why:** Serverless function filesystems are not persistent. A hosted relational database keeps
+  task data, audit history, and alert dismissals intact across function instances and deployments.

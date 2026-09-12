@@ -41,6 +41,21 @@ Open [http://localhost:8000](http://localhost:8000). The health check is availab
 On first start, SQLite creates the schema and the demo accounts below. Projects and tasks can then
 be created in the application; the database file is local-only and ignored by Git.
 
+## Deploy to Vercel
+
+The repository includes a Vercel entrypoint and routing configuration. For deployment, use a hosted
+Postgres database rather than SQLite because Vercel Functions do not provide persistent local disk
+storage.
+
+1. Create a free Supabase project and copy its Postgres connection string.
+2. Import this GitHub repository into Vercel with `fastapi-task-tracker` as the project root.
+3. In Vercel's environment variables, set `NORTHSTAR_DATABASE_URL` to that connection string. The
+   application accepts standard `postgres://` and `postgresql://` URLs.
+4. Deploy. The first application start creates the SQLAlchemy tables and demo accounts.
+
+Vercel serves the FastAPI API and the existing browser client from the same deployment URL. Supabase
+Free projects pause after inactivity, so open the project before sharing the URL if it has been idle.
+
 ## Test
 
 ```sh

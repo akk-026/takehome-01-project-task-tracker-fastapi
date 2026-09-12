@@ -1,6 +1,7 @@
 # Schema
 
-The SQLite database is managed by SQLAlchemy.
+The database is managed by SQLAlchemy: SQLite is used locally and PostgreSQL is used for a hosted
+deployment. The table structure is the same in both environments.
 
 - `users`: integer `id`, name, unique email, password hash, role, and creation timestamp.
 - `projects`: integer `id`, unique short key, name, description, owner ID, archived flag, and
