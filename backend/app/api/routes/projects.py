@@ -7,6 +7,7 @@ from app.api.dependencies import get_current_manager, get_current_user, get_db
 from app.models.project import Project, project_members
 from app.models.task import Task, task_assignees
 from app.models.user import User, UserRole
+from app.services.task_history import record_task_activity
 from app.schemas.projects import CreateProjectRequest, ProjectResponse, ReplaceProjectMembersRequest, UpdateProjectRequest
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -115,7 +116,7 @@ def update_project(
 def replace_project_members(
     project_id: int,
     payload: ReplaceProjectMembersRequest,
-    _: User = Depends(get_current_manager),
+    manager: User = Depends(get_current_manager),
     session: Session = Depends(get_db),
 ) -> Project:
     project = _get_project_for_manager(session, project_id)
@@ -124,6 +125,25 @@ def replace_project_members(
     removed_member_ids = existing_member_ids - {member.id for member in members}
     project.members = members
     if removed_member_ids:
+        affected_tasks = list(
+            session.scalars(
+                select(Task)
+                .join(task_assignees)
+                .where(Task.project_id == project.id, task_assignees.c.user_id.in_(removed_member_ids))
+                .options(selectinload(Task.assignees))
+            ).unique()
+        )
+        for task in affected_tasks:
+            for assignee in task.assignees:
+                if assignee.id in removed_member_ids:
+                    record_task_activity(
+                        session,
+                        task,
+                        manager,
+                        "UNASSIGNED",
+                        field_name="assignee",
+                        old_value=assignee.name,
+                    )
         session.execute(
             delete(task_assignees).where(
                 task_assignees.c.user_id.in_(removed_member_ids),

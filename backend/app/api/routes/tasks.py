@@ -11,15 +11,19 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.dependencies import get_current_manager, get_current_user, get_db
 from app.models.project import Project, project_members
 from app.models.task import Task, TaskPriority, TaskStatus, task_assignees, task_blockers
+from app.models.task_activity import TaskActivity
 from app.models.user import User, UserRole
+from app.services.task_history import record_task_activity
 from app.schemas.tasks import (
     AssignedTaskResponse,
     BulkTaskResult,
     BulkTaskUpdateResponse,
     TaskBulkUpdateRequest,
+    TaskCommentRequest,
     TaskResponse,
     TaskSearchResponse,
     TaskStatusChangeRequest,
+    TaskTimelineEvent,
     TaskWriteRequest,
 )
 
@@ -112,12 +116,19 @@ def _get_visible_task(session: Session, task_id: int, user: User) -> Task:
     return task
 
 
-def _set_blockers(session: Session, task: Task, blocker_ids: list[int]) -> None:
+def _blocker_names(tasks: list[Task]) -> str | None:
+    return ", ".join(sorted(task.title for task in tasks)) or None
+
+
+def _set_blockers(session: Session, task: Task, blocker_ids: list[int], actor: User) -> None:
+    previous_value = _blocker_names(task.blockers)
     requested_ids = set(blocker_ids)
     if task.id and task.id in requested_ids:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="A task cannot block itself.")
     if not requested_ids:
         task.blockers = []
+        if previous_value:
+            record_task_activity(session, task, actor, "FIELD_CHANGED", field_name="blockers", old_value=previous_value)
         return
     blockers = list(
         session.scalars(
@@ -135,12 +146,20 @@ def _set_blockers(session: Session, task: Task, blocker_ids: list[int]) -> None:
             detail="Every blocker must be an active task in the same project.",
         )
     task.blockers = blockers
+    next_value = _blocker_names(blockers)
+    if previous_value != next_value:
+        record_task_activity(
+            session, task, actor, "FIELD_CHANGED", field_name="blockers", old_value=previous_value, new_value=next_value
+        )
 
 
-def _set_assignees(session: Session, task: Task, assignee_ids: list[int]) -> None:
+def _set_assignees(session: Session, task: Task, assignee_ids: list[int], actor: User) -> None:
+    previous_assignees = {assignee.id: assignee for assignee in task.assignees}
     requested_ids = set(assignee_ids)
     if not requested_ids:
         task.assignees = []
+        for assignee in previous_assignees.values():
+            record_task_activity(session, task, actor, "UNASSIGNED", field_name="assignee", old_value=assignee.name)
         return
     assignees = list(
         session.scalars(
@@ -156,9 +175,14 @@ def _set_assignees(session: Session, task: Task, assignee_ids: list[int]) -> Non
             detail="Every assignee must be a member of this task's project.",
         )
     task.assignees = assignees
+    current_assignees = {assignee.id: assignee for assignee in assignees}
+    for assignee_id in sorted(previous_assignees.keys() - current_assignees.keys()):
+        record_task_activity(session, task, actor, "UNASSIGNED", field_name="assignee", old_value=previous_assignees[assignee_id].name)
+    for assignee_id in sorted(current_assignees.keys() - previous_assignees.keys()):
+        record_task_activity(session, task, actor, "ASSIGNED", field_name="assignee", new_value=current_assignees[assignee_id].name)
 
 
-def _move_task(task: Task, target_status: TaskStatus) -> None:
+def _move_task(session: Session, task: Task, target_status: TaskStatus, actor: User) -> None:
     if target_status not in task.available_statuses:
         if (
             task.status == TaskStatus.IN_REVIEW
@@ -177,9 +201,19 @@ def _move_task(task: Task, target_status: TaskStatus) -> None:
                 f"to {target_status.value.replace('_', ' ').title()}. Legal moves: {legal_moves}."
             ),
         )
+    previous_status = task.status
     task.blocked_from = task.status if target_status == TaskStatus.BLOCKED else None
     task.status = target_status
     task.completed_at = datetime.now(timezone.utc) if target_status == TaskStatus.DONE else None
+    record_task_activity(
+        session,
+        task,
+        actor,
+        "FIELD_CHANGED",
+        field_name="status",
+        old_value=previous_status.value,
+        new_value=target_status.value,
+    )
 
 
 @router.get("/projects/{project_id}", response_model=list[TaskResponse])
@@ -315,13 +349,25 @@ def bulk_update_tasks(
             with session.begin_nested():
                 task = _get_visible_task(session, task_id, user)
                 if payload.action == "status":
-                    _move_task(task, payload.status)
+                    _move_task(session, task, payload.status, user)
                     detail = f"Moved to {task.status.value.replace('_', ' ').title()}."
                 elif payload.action == "assignees":
-                    _set_assignees(session, task, payload.assignee_ids)
+                    _set_assignees(session, task, payload.assignee_ids, user)
                     detail = "Assignees replaced."
                 else:
+                    previous_due_date = task.due_date.isoformat() if task.due_date else None
                     task.due_date = payload.due_date
+                    next_due_date = task.due_date.isoformat() if task.due_date else None
+                    if previous_due_date != next_due_date:
+                        record_task_activity(
+                            session,
+                            task,
+                            user,
+                            "FIELD_CHANGED",
+                            field_name="due date",
+                            old_value=previous_due_date,
+                            new_value=next_due_date,
+                        )
                     detail = "Due date updated."
                 session.flush()
                 results.append(BulkTaskResult(task_id=task_id, succeeded=True, detail=detail, task=task))
@@ -353,8 +399,9 @@ def create_task(
     )
     session.add(task)
     session.flush()
-    _set_blockers(session, task, payload.blocker_ids)
-    _set_assignees(session, task, payload.assignee_ids)
+    record_task_activity(session, task, user, "CREATED")
+    _set_blockers(session, task, payload.blocker_ids, user)
+    _set_assignees(session, task, payload.assignee_ids, user)
     session.commit()
     return session.scalar(_task_query().where(Task.id == task.id))
 
@@ -367,9 +414,38 @@ def change_task_status(
     session: Session = Depends(get_db),
 ) -> Task:
     task = _get_visible_task(session, task_id, user)
-    _move_task(task, payload.status)
+    _move_task(session, task, payload.status, user)
     session.commit()
     return session.scalar(_task_query().where(Task.id == task.id))
+
+
+@router.get("/{task_id}/timeline", response_model=list[TaskTimelineEvent])
+def get_task_timeline(task_id: int, user: User = Depends(get_current_user), session: Session = Depends(get_db)) -> list[TaskActivity]:
+    _get_visible_task(session, task_id, user)
+    return list(
+        session.scalars(
+            select(TaskActivity)
+            .where(TaskActivity.task_id == task_id)
+            .options(selectinload(TaskActivity.actor))
+            .order_by(TaskActivity.created_at, TaskActivity.id)
+        )
+    )
+
+
+@router.post("/{task_id}/comments", response_model=TaskTimelineEvent, status_code=status.HTTP_201_CREATED)
+def add_task_comment(
+    task_id: int,
+    payload: TaskCommentRequest,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> TaskActivity:
+    task = _get_visible_task(session, task_id, user)
+    comment = payload.comment.strip()
+    if not comment:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Comment cannot be blank.")
+    activity = record_task_activity(session, task, user, "COMMENTED", comment=comment)
+    session.commit()
+    return session.scalar(select(TaskActivity).options(selectinload(TaskActivity.actor)).where(TaskActivity.id == activity.id))
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
@@ -385,12 +461,23 @@ def update_task(
     session: Session = Depends(get_db),
 ) -> Task:
     task = _get_visible_task(session, task_id, user)
-    task.title = _clean_title(payload.title)
-    task.description = payload.description.strip()
+    updates = (
+        ("title", task.title, _clean_title(payload.title)),
+        ("description", task.description, payload.description.strip()),
+        ("priority", task.priority.value, payload.priority.value),
+        ("due date", task.due_date.isoformat() if task.due_date else None, payload.due_date.isoformat() if payload.due_date else None),
+    )
+    task.title = updates[0][2]
+    task.description = updates[1][2]
     task.priority = payload.priority
     task.due_date = payload.due_date
-    _set_blockers(session, task, payload.blocker_ids)
-    _set_assignees(session, task, payload.assignee_ids)
+    for field_name, previous_value, next_value in updates:
+        if previous_value != next_value:
+            record_task_activity(
+                session, task, user, "FIELD_CHANGED", field_name=field_name, old_value=previous_value, new_value=next_value
+            )
+    _set_blockers(session, task, payload.blocker_ids, user)
+    _set_assignees(session, task, payload.assignee_ids, user)
     if task.status == TaskStatus.DONE and any(blocker.status != TaskStatus.DONE for blocker in task.blockers):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -415,5 +502,6 @@ def delete_task(
         )
     )
     task.deleted = True
+    record_task_activity(session, task, _, "DELETED")
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

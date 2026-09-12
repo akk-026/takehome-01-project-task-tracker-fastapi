@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.task import TaskPriority, TaskStatus
+from app.schemas.auth import UserResponse
 
 
 class TaskWriteRequest(BaseModel):
@@ -17,6 +18,10 @@ class TaskWriteRequest(BaseModel):
 
 class TaskStatusChangeRequest(BaseModel):
     status: TaskStatus
+
+
+class TaskCommentRequest(BaseModel):
+    comment: str = Field(min_length=1, max_length=4_000)
 
 
 class TaskResponse(BaseModel):
@@ -70,3 +75,16 @@ class BulkTaskUpdateResponse(BaseModel):
     results: list[BulkTaskResult]
     succeeded: int
     rejected: int
+
+
+class TaskTimelineEvent(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    action: str
+    field_name: str | None
+    old_value: str | None
+    new_value: str | None
+    comment: str | None
+    created_at: datetime
+    actor: UserResponse | None

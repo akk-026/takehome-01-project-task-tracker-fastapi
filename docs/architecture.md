@@ -22,6 +22,11 @@ user's visible projects, calculates headline totals and status/assignee breakdow
 eight calendar-week completion buckets. A task records `completed_at` whenever it enters Done, so
 completion reporting does not change when a finished task is later edited.
 
-I deliberately have not built invitations, password reset, real-time collaboration, immutable task
-history, alerts, or deployment yet. Those cover later requirements and are kept out of the current
-scope while the first eight features are completed and tested.
+Task history is an append-only `task_activities` table. Each write route adds activity rows in the
+same transaction as the task change, so a successful task update and its audit trail cannot diverge.
+The timeline and comment endpoints are visibility-checked reads/creates only: there is no update or
+delete route for an activity, including comments.
+
+I deliberately have not built invitations, password reset, real-time collaboration, alerts, or
+deployment yet. Those cover later requirements and are kept out of the current scope while the
+first nine features are completed and tested.

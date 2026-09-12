@@ -64,3 +64,12 @@
   figures to regular members.
 - **Why:** It protects project visibility, keeps the dashboard compact, and makes all displayed
   values come from a single consistent server-side snapshot.
+
+## 10. Make timeline events append-only records
+
+- **Chose:** Store task activity and comments in one table, with no API operation to update or delete
+  a row.
+- **Rejected:** Editable comment records alongside a separate audit log, or allowing managers to
+  clean up history.
+- **Why:** A single chronological feed is straightforward to inspect, and treating comments as
+  immutable events satisfies the requirement that the complete task history cannot be rewritten.

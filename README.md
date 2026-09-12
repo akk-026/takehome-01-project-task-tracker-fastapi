@@ -28,6 +28,10 @@ overdue, due-this-week, and completed-this-week totals; task counts by status an
 eight-week completion chart. Tasks store their completion timestamp when they move to Done, so later
 edits do not alter completion reporting.
 
+Every task includes an append-only timeline for creation, field and status changes, assignments,
+unassignments, and comments. Each event records the actor and before/after values where relevant.
+Comments are timeline entries and cannot be edited or deleted, including by managers.
+
 ## Run locally
 
 ```sh

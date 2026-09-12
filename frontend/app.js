@@ -224,7 +224,41 @@ function statusControls(task) {
   return `<div class="status-actions">${buttons}</div>`;
 }
 
-function taskCard(task, tasks, isManager, members) {
+function displayTimelineValue(value) {
+  return value === null || value === undefined || value === '' ? 'None' : value;
+}
+
+function timelineMessage(event) {
+  const actor = escapeHtml(event.actor?.name || 'System');
+  if (event.action === 'CREATED') return `<b>${actor}</b> created this task.`;
+  if (event.action === 'COMMENTED') return `<b>${actor}</b> commented:<br>${escapeHtml(event.comment)}`;
+  if (event.action === 'ASSIGNED') return `<b>${actor}</b> assigned <b>${escapeHtml(event.new_value)}</b>.`;
+  if (event.action === 'UNASSIGNED') return `<b>${actor}</b> unassigned <b>${escapeHtml(event.old_value)}</b>.`;
+  if (event.action === 'DELETED') return `<b>${actor}</b> deleted this task.`;
+  return `<b>${actor}</b> changed ${escapeHtml(event.field_name)} from <b>${escapeHtml(displayTimelineValue(event.old_value))}</b> to <b>${escapeHtml(displayTimelineValue(event.new_value))}</b>.`;
+}
+
+function taskTimeline(task, events) {
+  const entries = events.map(event => `
+    <li class="timeline-event ${event.action.toLowerCase()}">
+      <time datetime="${escapeHtml(event.created_at)}">${escapeHtml(new Date(event.created_at).toLocaleString())}</time>
+      <div>${timelineMessage(event)}</div>
+    </li>
+  `).join('');
+  return `
+    <section class="task-timeline" aria-label="Timeline for ${escapeHtml(task.title)}">
+      <h4>Timeline</h4>
+      <ol>${entries || '<li class="hint">No history has been recorded yet.</li>'}</ol>
+      <form class="comment-form" data-task-id="${task.id}">
+        <label>Add a comment</label>
+        <textarea name="comment" maxlength="4000" required placeholder="Leave an update for the project team"></textarea>
+        <button class="secondary">Post comment</button>
+      </form>
+    </section>
+  `;
+}
+
+function taskCard(task, tasks, isManager, members, timeline) {
   const blockers = task.blocker_ids.map(id => tasks.find(candidate => candidate.id === id)?.title || `Task #${id}`).map(escapeHtml).join(', ');
   const assignees = task.assignee_ids.map(id => members.find(member => member.id === id)?.name || `User #${id}`).map(escapeHtml).join(', ');
   const deleteControl = isManager ? `<button class="delete-task" data-task-id="${task.id}">Delete task</button>` : '';
@@ -247,6 +281,7 @@ function taskCard(task, tasks, isManager, members) {
         </form>
         ${deleteControl}
       </details>
+      ${taskTimeline(task, timeline)}
     </article>
   `;
 }
@@ -469,6 +504,8 @@ async function showProjectDetail(user, projectId, options = {}) {
       api(`/api/projects/${projectId}`),
       api(`/api/tasks/projects/${projectId}`)
     ]);
+    const timelineEntries = await Promise.all(tasks.map(async task => [task.id, await api(`/api/tasks/${task.id}/timeline`)]));
+    const timelines = new Map(timelineEntries);
     root.innerHTML = `
       <div class="topbar">
         <div><div class="brand">✦ NORTHSTAR</div><h1>${escapeHtml(project.name)}</h1><p>${escapeHtml(project.description || 'No description yet.')}</p></div>
@@ -478,7 +515,7 @@ async function showProjectDetail(user, projectId, options = {}) {
       ${createTaskPanel(project, tasks)}
       <section>
         <h2>Tasks</h2>
-        <div class="tasks">${tasks.length ? tasks.map(task => taskCard(task, tasks, user.role === 'MANAGER', project.members)).join('') : '<p class="hint">No tasks in this project yet.</p>'}</div>
+        <div class="tasks">${tasks.length ? tasks.map(task => taskCard(task, tasks, user.role === 'MANAGER', project.members, timelines.get(task.id) || [])).join('') : '<p class="hint">No tasks in this project yet.</p>'}</div>
       </section>
     `;
     bindProjectEvents(user, projectId, showArchived);
@@ -523,6 +560,20 @@ function bindProjectEvents(user, projectId, showArchived) {
     button.onclick = async () => {
       try {
         await api(`/api/tasks/${button.dataset.taskId}`, { method: 'DELETE' });
+        showProjectDetail(user, projectId, { showArchived });
+      } catch (reason) {
+        showProjectDetail(user, projectId, { showArchived, error: reason.message });
+      }
+    };
+  });
+  document.querySelectorAll('.comment-form').forEach(form => {
+    form.onsubmit = async event => {
+      event.preventDefault();
+      try {
+        await api(`/api/tasks/${form.dataset.taskId}/comments`, {
+          method: 'POST',
+          body: JSON.stringify({ comment: new FormData(form).get('comment') })
+        });
         showProjectDetail(user, projectId, { showArchived });
       } catch (reason) {
         showProjectDetail(user, projectId, { showArchived, error: reason.message });

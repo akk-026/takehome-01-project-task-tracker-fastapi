@@ -164,6 +164,14 @@ legend { font-size: 12px; font-weight: 800; text-transform: uppercase; color: #4
 
 .status-actions { flex-wrap: wrap; margin-top: 16px; }
 .status-actions .secondary { margin: 0; }
+.task-timeline { margin-top: 20px; padding-top: 18px; border-top: 1px solid #e0e5f0; }
+.task-timeline h4 { margin: 0 0 12px; }
+.task-timeline ol { margin: 0; padding: 0; list-style: none; }
+.timeline-event { display: grid; grid-template-columns: 118px 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid #edf0f5; color: #44506a; font-size: 13px; line-height: 1.45; }
+.timeline-event time { color: #778299; font-size: 11px; font-weight: 700; }
+.timeline-event.commented { padding: 12px; border: 0; border-radius: 8px; background: #f0efff; }
+.comment-form { margin-top: 14px; }
+.comment-form .secondary { margin-top: 10px; }
 .search-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
 .search-controls button { grid-column: 1 / -1; }
 .pagination { justify-content: space-between; margin-top: 18px; }
@@ -183,4 +191,5 @@ button:disabled { cursor: default; opacity: .5; }
   .search-controls { grid-template-columns: 1fr; }
   .dashboard-metrics, .dashboard-charts { grid-template-columns: 1fr; }
   .completion-chart { grid-column: auto; }
+  .timeline-event { grid-template-columns: 1fr; gap: 3px; }
 }

@@ -19,6 +19,7 @@ def initialise_database() -> None:
 
     Base.metadata.create_all(bind=engine)
     _migrate_legacy_tasks()
+    _backfill_legacy_task_history()
 
 
 def _migrate_legacy_tasks() -> None:
@@ -43,3 +44,20 @@ def _migrate_legacy_tasks() -> None:
             connection.execute(text("UPDATE tasks SET updated_at = created_at WHERE updated_at IS NULL"))
         if "completed_at" not in columns:
             connection.execute(text("UPDATE tasks SET completed_at = updated_at WHERE status = 'DONE'"))
+
+
+def _backfill_legacy_task_history() -> None:
+    """Give pre-history tasks an honest creation marker without inventing an actor."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO task_activities (task_id, actor_id, action, created_at)
+                SELECT tasks.id, NULL, 'CREATED', tasks.created_at
+                FROM tasks
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM task_activities WHERE task_activities.task_id = tasks.id
+                )
+                """
+            )
+        )

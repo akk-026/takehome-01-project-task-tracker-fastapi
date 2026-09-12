@@ -15,7 +15,8 @@ tested independently.
    functions so follow-on work is easier to change safely.
 8. Add the authenticated dashboard summary, persist completion timestamps through lifecycle changes,
    and cover manager/member visibility plus calendar-week reporting with automated tests.
+9. Add an append-only timeline, record task mutation and membership-driven unassignment events in the
+   server transaction, and add comments without any edit or delete capability.
 
-The next sessions will cover immutable history/comments and overdue alerts. I have not estimated
-those as complete work; they remain intentionally out of scope rather than being shown as partially
-finished features.
+The next session will cover overdue alerts. I have not estimated it as complete work; it remains
+intentionally out of scope rather than being shown as partially finished.
