@@ -2,12 +2,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.user import User, UserRole
-from app.services.security import hash_password
+from app.services.security import hash_password, verify_password
 
 
 DEMO_USERS = (
     {"name": "Alice Morgan", "email": "alice@northstar.test", "password": "manager123", "role": UserRole.MANAGER},
     {"name": "Dan Chen", "email": "dan@northstar.test", "password": "member123", "role": UserRole.MEMBER},
+    {"name": "Priya Shah", "email": "priya@northstar.test", "password": "member123", "role": UserRole.MEMBER},
 )
 
 
@@ -21,6 +22,9 @@ def seed_demo_users(session: Session) -> None:
 
 def authenticate(session: Session, email: str, password: str) -> User | None:
     user = session.scalar(select(User).where(User.email == email.lower().strip()))
-    if not user or user.password_hash != hash_password(password):
+    if not user or not verify_password(password, user.password_hash):
         return None
+    if not user.password_hash.startswith("pbkdf2_sha256$"):
+        user.password_hash = hash_password(password)
+        session.commit()
     return user
