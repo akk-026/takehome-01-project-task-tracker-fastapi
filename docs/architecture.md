@@ -27,6 +27,9 @@ same transaction as the task change, so a successful task update and its audit t
 The timeline and comment endpoints are visibility-checked reads/creates only: there is no update or
 delete route for an activity, including comments.
 
-I deliberately have not built invitations, password reset, real-time collaboration, alerts, or
-deployment yet. Those cover later requirements and are kept out of the current scope while the
-first nine features are completed and tested.
+The overdue alert endpoint is scoped to the current user's assigned tasks. It filters active tasks
+that are past due and unfinished, excluding that user's dismissal records. A due-date write deletes
+all dismissal records for the task in the same transaction, making its revised deadline visible again.
+
+I deliberately have not built invitations, password reset, real-time collaboration, or deployment
+yet. Those are kept out of the current scope while all ten required features are completed and tested.

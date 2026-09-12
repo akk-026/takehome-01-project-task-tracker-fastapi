@@ -32,6 +32,9 @@ Every task includes an append-only timeline for creation, field and status chang
 unassignments, and comments. Each event records the actor and before/after values where relevant.
 Comments are timeline entries and cannot be edited or deleted, including by managers.
 
+The header alert badge shows each person's currently overdue assigned tasks. An alert can be
+dismissed by its assignee; changing that task's due date restores the alert for every assignee.
+
 ## Run locally
 
 ```sh

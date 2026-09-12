@@ -13,6 +13,7 @@ from app.models.project import Project, project_members
 from app.models.task import Task, TaskPriority, TaskStatus, task_assignees, task_blockers
 from app.models.task_activity import TaskActivity
 from app.models.user import User, UserRole
+from app.services.task_alerts import restore_task_alerts
 from app.services.task_history import record_task_activity
 from app.schemas.tasks import (
     AssignedTaskResponse,
@@ -359,6 +360,7 @@ def bulk_update_tasks(
                     task.due_date = payload.due_date
                     next_due_date = task.due_date.isoformat() if task.due_date else None
                     if previous_due_date != next_due_date:
+                        restore_task_alerts(session, task.id)
                         record_task_activity(
                             session,
                             task,
@@ -473,6 +475,8 @@ def update_task(
     task.due_date = payload.due_date
     for field_name, previous_value, next_value in updates:
         if previous_value != next_value:
+            if field_name == "due date":
+                restore_task_alerts(session, task.id)
             record_task_activity(
                 session, task, user, "FIELD_CHANGED", field_name=field_name, old_value=previous_value, new_value=next_value
             )

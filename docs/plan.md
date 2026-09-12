@@ -17,6 +17,7 @@ tested independently.
    and cover manager/member visibility plus calendar-week reporting with automated tests.
 9. Add an append-only timeline, record task mutation and membership-driven unassignment events in the
    server transaction, and add comments without any edit or delete capability.
+10. Add personal overdue alerts, a navigation count badge, dismissal controls, and deadline-change
+    restoration backed by a per-user dismissal table.
 
-The next session will cover overdue alerts. I have not estimated it as complete work; it remains
-intentionally out of scope rather than being shown as partially finished.
+All ten required features are now planned and implemented in focused, independently testable commits.

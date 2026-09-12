@@ -73,3 +73,11 @@
   clean up history.
 - **Why:** A single chronological feed is straightforward to inspect, and treating comments as
   immutable events satisfies the requirement that the complete task history cannot be rewritten.
+
+## 11. Make alert dismissals personal and deadline-specific
+
+- **Chose:** Show overdue alerts only to assignees, store their dismissals separately, and clear all
+  dismissals as soon as a task's due date changes.
+- **Rejected:** A global task-level dismissal, or retaining a dismissal if a deadline is revised.
+- **Why:** Each assignee needs independent control over their alert. A changed due date represents a
+  new commitment, so the alert must reliably return for everyone rather than being hidden by stale state.

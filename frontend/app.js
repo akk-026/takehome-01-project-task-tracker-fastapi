@@ -152,6 +152,31 @@ function dashboardPanel(dashboard) {
   `;
 }
 
+function overdueAlertCard(task) {
+  return `
+    <article class="task alert-task">
+      <div class="task-heading"><div><span class="project-key">${escapeHtml(task.project_key)}</span><h3>${escapeHtml(task.title)}</h3></div>${priorityBadge(task)}</div>
+      <p>${escapeHtml(task.project_name)} · <b>Due ${escapeHtml(task.due_date)}</b></p>
+      <div class="alert-actions">
+        <button class="dismiss-alert secondary" data-task-id="${task.id}">Dismiss alert</button>
+        <button class="open-project secondary" data-project-id="${task.project_id}">Open project</button>
+      </div>
+    </article>
+  `;
+}
+
+function overdueAlertsPanel(alerts) {
+  const cards = alerts.items.length
+    ? alerts.items.map(overdueAlertCard).join('')
+    : '<p class="hint">No overdue tasks assigned to you.</p>';
+  return `
+    <section id="overdue-alerts" class="alerts-panel" aria-label="Overdue task alerts">
+      <div class="section-heading"><div><h2>Overdue alerts</h2><p class="hint">Only tasks assigned to you appear here.</p></div></div>
+      <div class="tasks">${cards}</div>
+    </section>
+  `;
+}
+
 function projectCard(project, isManager, users) {
   const members = project.members.map(member => escapeHtml(member.name)).join(', ') || 'No members';
   const owners = users.map(person => `
@@ -587,12 +612,13 @@ async function showHome(user, options = {}) {
   try {
     const isManager = user.role === 'MANAGER';
     const taskFilters = { ...defaultTaskFilters, ...searchFilters };
-    const [projects, users, assignedTasks, taskSearch, dashboard] = await Promise.all([
+    const [projects, users, assignedTasks, taskSearch, dashboard, alerts] = await Promise.all([
       api(isManager && showArchived ? '/api/projects?include_archived=true' : '/api/projects'),
       isManager ? api('/api/users') : Promise.resolve([]),
       api('/api/tasks/assigned'),
       api(taskSearchPath(taskFilters)),
-      api('/api/dashboard')
+      api('/api/dashboard'),
+      api('/api/alerts')
     ]);
     const activeProjects = projects.filter(project => !project.archived);
     const archivedProjects = projects.filter(project => project.archived);
@@ -601,8 +627,9 @@ async function showHome(user, options = {}) {
     const projectCreation = isManager ? createProjectPanel(users) : '<p class="hint">You only see projects where you are a member.</p>';
     const archivedSection = showArchived ? `<section><h2>Archived projects</h2><div class="projects">${archivedProjects.length ? archivedProjects.map(project => projectCard(project, true, users)).join('') : '<p class="hint">No archived projects.</p>'}</div></section>` : '';
     root.innerHTML = `
-      <div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>Welcome, ${escapeHtml(user.name.split(' ')[0])}.</h1><span class="role">${isManager ? 'Manager' : 'Member'}</span></div><div class="header-actions">${archiveToggle}<button id="logout" class="secondary">Sign out</button></div></div>
+      <div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>Welcome, ${escapeHtml(user.name.split(' ')[0])}.</h1><span class="role">${isManager ? 'Manager' : 'Member'}</span></div><div class="header-actions">${archiveToggle}<button id="alerts-nav" class="secondary">Alerts <span class="alert-count">${alerts.count}</span></button><button id="logout" class="secondary">Sign out</button></div></div>
       ${errorMessage(error)}
+      ${overdueAlertsPanel(alerts)}
       ${dashboardPanel(dashboard)}
       ${taskSearchPanel(taskSearch, activeProjects, people, taskFilters, bulkResult)}
       <section><h2>Assigned to you</h2><div class="tasks">${assignedTasks.length ? assignedTasks.map(assignedTaskCard).join('') : '<p class="hint">No tasks are assigned to you.</p>'}</div></section>
@@ -624,6 +651,7 @@ function bindHomeEvents(user, state) {
     localStorage.removeItem(tokenKey);
     showLogin();
   };
+  document.querySelector('#alerts-nav').onclick = () => document.querySelector('#overdue-alerts').scrollIntoView({ behavior: 'smooth' });
   document.querySelector('#task-search').onsubmit = event => {
     event.preventDefault();
     showHome(user, { showArchived, searchFilters: homeFilters(new FormData(event.currentTarget)) });
@@ -633,6 +661,16 @@ function bindHomeEvents(user, state) {
   });
   document.querySelectorAll('.open-project').forEach(button => {
     button.onclick = () => showProjectDetail(user, button.dataset.projectId, { showArchived });
+  });
+  document.querySelectorAll('.dismiss-alert').forEach(button => {
+    button.onclick = async () => {
+      try {
+        await api(`/api/alerts/${button.dataset.taskId}/dismiss`, { method: 'POST' });
+        showHome(user, { showArchived, searchFilters: taskFilters });
+      } catch (reason) {
+        showHome(user, { error: reason.message, showArchived, searchFilters: taskFilters });
+      }
+    };
   });
   document.querySelector('#export-tasks').onclick = async () => {
     try {
