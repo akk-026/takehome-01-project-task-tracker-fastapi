@@ -62,8 +62,10 @@ class ProjectAuthorizationTests(unittest.TestCase):
 
         member_headers = self.headers(self.dan)
         self.assertEqual(self.client.post("/api/projects", headers=member_headers, json={"key": "NO", "name": "No", "owner_id": self.dan["user"]["id"]}).status_code, 403)
+        self.assertEqual(self.client.put(f"/api/projects/{project['id']}", headers=member_headers, json={"key": "NO", "name": "No", "owner_id": self.dan["user"]["id"]}).status_code, 403)
         self.assertEqual(self.client.put(f"/api/projects/{project['id']}/members", headers=member_headers, json={"member_ids": []}).status_code, 403)
         self.assertEqual(self.client.post(f"/api/projects/{project['id']}/archive", headers=member_headers).status_code, 403)
+        self.assertEqual(self.client.post(f"/api/projects/{project['id']}/restore", headers=member_headers).status_code, 403)
         self.assertEqual(self.client.delete(f"/api/tasks/{task_id}", headers=member_headers).status_code, 403)
         self.assertEqual(self.client.get("/api/users", headers=member_headers).status_code, 403)
 
@@ -86,3 +88,39 @@ class ProjectAuthorizationTests(unittest.TestCase):
         self.assertEqual({member["id"] for member in member_update.json()["members"]}, {self.dan["user"]["id"], self.priya["user"]["id"]})
         self.assertTrue(self.client.post(f"/api/projects/{project['id']}/archive", headers=manager_headers).json()["archived"])
         self.assertEqual(self.client.delete(f"/api/tasks/{task_id}", headers=manager_headers).status_code, 204)
+
+    def test_manager_can_edit_restore_and_preserve_archived_project_data(self) -> None:
+        project = self.create_project()
+        with SessionLocal() as database:
+            task = Task(project_id=project["id"], title="Keep this task")
+            database.add(task)
+            database.commit()
+            database.refresh(task)
+            task_id = task.id
+
+        manager_headers = self.headers(self.manager)
+        edited = self.client.put(
+            f"/api/projects/{project['id']}",
+            headers=manager_headers,
+            json={
+                "key": "PLAT",
+                "name": "Platform refresh",
+                "description": "Updated scope.",
+                "owner_id": self.priya["user"]["id"],
+            },
+        )
+        self.assertEqual(edited.status_code, 200)
+        self.assertEqual(edited.json()["key"], "PLAT")
+        self.assertEqual(edited.json()["owner"]["id"], self.priya["user"]["id"])
+        self.assertEqual({member["id"] for member in edited.json()["members"]}, {self.dan["user"]["id"], self.priya["user"]["id"]})
+
+        self.assertTrue(self.client.post(f"/api/projects/{project['id']}/archive", headers=manager_headers).json()["archived"])
+        self.assertEqual(self.client.get("/api/projects", headers=manager_headers).json(), [])
+        self.assertEqual(self.client.get("/api/projects?include_archived=true", headers=manager_headers).json()[0]["id"], project["id"])
+        with SessionLocal() as database:
+            self.assertEqual(database.get(Task, task_id).title, "Keep this task")
+
+        restored = self.client.post(f"/api/projects/{project['id']}/restore", headers=manager_headers)
+        self.assertEqual(restored.status_code, 200)
+        self.assertFalse(restored.json()["archived"])
+        self.assertEqual(self.client.get("/api/projects", headers=manager_headers).json()[0]["id"], project["id"])

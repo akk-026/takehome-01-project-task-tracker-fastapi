@@ -38,53 +38,80 @@ function memberChoices(users, selectedIds, name = 'memberIds') {
 
 function projectCard(project, isManager, users) {
   const memberNames = project.members.map(member => escapeHtml(member.name)).join(', ') || 'No members';
-  const controls = isManager ? `<details><summary>Manage members</summary><form class="members-form" data-project-id="${project.id}">${memberChoices(users, project.members.map(member => member.id))}<button>Save members</button></form><button class="archive" data-project-id="${project.id}" ${project.archived ? 'disabled' : ''}>${project.archived ? 'Archived' : 'Archive project'}</button></details>` : '';
+  const ownerOptions = users.map(person => `<option value="${person.id}" ${person.id === project.owner.id ? 'selected' : ''}>${escapeHtml(person.name)}</option>`).join('');
+  const archiveControl = project.archived
+    ? `<button class="restore" data-project-id="${project.id}">Restore project</button>`
+    : `<button class="archive" data-project-id="${project.id}">Archive project</button>`;
+  const controls = isManager ? `<details><summary>Manage project</summary><form class="edit-project-form" data-project-id="${project.id}"><label>Key</label><input name="key" maxlength="12" value="${escapeHtml(project.key)}" required><label>Name</label><input name="name" maxlength="160" value="${escapeHtml(project.name)}" required><label>Description</label><input name="description" maxlength="2000" value="${escapeHtml(project.description)}"><label>Owner</label><select name="ownerId">${ownerOptions}</select><button>Save project</button></form><form class="members-form" data-project-id="${project.id}"><fieldset><legend>Project members</legend>${memberChoices(users, project.members.map(member => member.id))}</fieldset><button>Save members</button></form>${archiveControl}</details>` : '';
   return `<article class="project"><div><span class="project-key">${escapeHtml(project.key)}</span>${project.archived ? '<span class="archived">Archived</span>' : ''}</div><h2>${escapeHtml(project.name)}</h2><p>${escapeHtml(project.description || 'No description yet.')}</p><small><b>Owner:</b> ${escapeHtml(project.owner.name)} · <b>Members:</b> ${memberNames}</small>${controls}</article>`;
 }
 
-async function showHome(user, error = '') {
+async function showHome(user, error = '', showArchived = false) {
   try {
     const isManager = user.role === 'MANAGER';
     const [projects, users] = await Promise.all([
-      api('/api/projects'),
+      api(isManager && showArchived ? '/api/projects?include_archived=true' : '/api/projects'),
       isManager ? api('/api/users') : Promise.resolve([])
     ]);
+    const activeProjects = projects.filter(project => !project.archived);
+    const archivedProjects = projects.filter(project => project.archived);
     const createProject = isManager ? `<section class="panel"><h2>Create project</h2><form id="create-project"><label>Key</label><input name="key" maxlength="12" placeholder="OPS" required><label>Name</label><input name="name" maxlength="160" required><label>Description</label><input name="description" maxlength="2000"><label>Owner</label><select name="ownerId">${users.map(person => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}</select><fieldset><legend>Project members</legend>${memberChoices(users, [])}</fieldset><button>Create project</button></form></section>` : '<p class="hint">You only see projects where you are a member.</p>';
-    root.innerHTML = `<div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>Welcome, ${escapeHtml(user.name.split(' ')[0])}.</h1><span class="role">${isManager ? 'Manager' : 'Member'}</span></div><button id="logout" class="secondary">Sign out</button></div>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}${createProject}<section><h2>${isManager ? 'All active projects' : 'Your projects'}</h2><div class="projects">${projects.length ? projects.map(project => projectCard(project, isManager, users)).join('') : '<p class="hint">No active projects yet.</p>'}</div></section>`;
+    const archiveToggle = isManager ? `<button id="toggle-archived" class="secondary">${showArchived ? 'Hide archived projects' : 'Show archived projects'}</button>` : '';
+    const archivedSection = showArchived ? `<section><h2>Archived projects</h2><div class="projects">${archivedProjects.length ? archivedProjects.map(project => projectCard(project, true, users)).join('') : '<p class="hint">No archived projects.</p>'}</div></section>` : '';
+    root.innerHTML = `<div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>Welcome, ${escapeHtml(user.name.split(' ')[0])}.</h1><span class="role">${isManager ? 'Manager' : 'Member'}</span></div><div class="header-actions">${archiveToggle}<button id="logout" class="secondary">Sign out</button></div></div>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}${createProject}<section><h2>${isManager ? 'All active projects' : 'Your projects'}</h2><div class="projects">${activeProjects.length ? activeProjects.map(project => projectCard(project, isManager, users)).join('') : '<p class="hint">No active projects yet.</p>'}</div></section>${archivedSection}`;
     document.querySelector('#logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }); localStorage.removeItem(tokenKey); showLogin(); };
-    if (isManager) bindManagerControls(user);
+    if (isManager) bindManagerControls(user, showArchived);
   } catch (reason) {
     localStorage.removeItem(tokenKey);
     showLogin(reason.message);
   }
 }
 
-function bindManagerControls(user) {
+function bindManagerControls(user, showArchived) {
+  document.querySelector('#toggle-archived').onclick = () => showHome(user, '', !showArchived);
   document.querySelector('#create-project').onsubmit = async event => {
     event.preventDefault();
     const form = event.currentTarget;
     const values = new FormData(form);
     try {
       await api('/api/projects', { method: 'POST', body: JSON.stringify({ key: values.get('key'), name: values.get('name'), description: values.get('description'), owner_id: Number(values.get('ownerId')), member_ids: values.getAll('memberIds').map(Number) }) });
-      showHome(user);
-    } catch (reason) { showHome(user, reason.message); }
+      showHome(user, '', showArchived);
+    } catch (reason) { showHome(user, reason.message, showArchived); }
   };
+  document.querySelectorAll('.edit-project-form').forEach(form => {
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const values = new FormData(form);
+      try {
+        await api(`/api/projects/${form.dataset.projectId}`, { method: 'PUT', body: JSON.stringify({ key: values.get('key'), name: values.get('name'), description: values.get('description'), owner_id: Number(values.get('ownerId')) }) });
+        showHome(user, '', showArchived);
+      } catch (reason) { showHome(user, reason.message, showArchived); }
+    };
+  });
   document.querySelectorAll('.members-form').forEach(form => {
     form.onsubmit = async event => {
       event.preventDefault();
       const values = new FormData(form);
       try {
         await api(`/api/projects/${form.dataset.projectId}/members`, { method: 'PUT', body: JSON.stringify({ member_ids: values.getAll('memberIds').map(Number) }) });
-        showHome(user);
-      } catch (reason) { showHome(user, reason.message); }
+        showHome(user, '', showArchived);
+      } catch (reason) { showHome(user, reason.message, showArchived); }
     };
   });
   document.querySelectorAll('.archive').forEach(button => {
     button.onclick = async () => {
       try {
         await api(`/api/projects/${button.dataset.projectId}/archive`, { method: 'POST' });
-        showHome(user);
-      } catch (reason) { showHome(user, reason.message); }
+        showHome(user, '', showArchived);
+      } catch (reason) { showHome(user, reason.message, showArchived); }
+    };
+  });
+  document.querySelectorAll('.restore').forEach(button => {
+    button.onclick = async () => {
+      try {
+        await api(`/api/projects/${button.dataset.projectId}/restore`, { method: 'POST' });
+        showHome(user, '', showArchived);
+      } catch (reason) { showHome(user, reason.message, showArchived); }
     };
   });
 }

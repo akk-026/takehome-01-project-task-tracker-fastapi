@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.dependencies import get_current_manager, get_current_user, get_db
 from app.models.project import Project, project_members
 from app.models.user import User, UserRole
-from app.schemas.projects import CreateProjectRequest, ProjectResponse, ReplaceProjectMembersRequest
+from app.schemas.projects import CreateProjectRequest, ProjectResponse, ReplaceProjectMembersRequest, UpdateProjectRequest
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -33,6 +33,22 @@ def _load_members(session: Session, member_ids: list[int], owner_id: int) -> lis
     if missing_ids:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Unknown user IDs: {missing_ids}.")
     return members
+
+
+def _get_project_for_manager(session: Session, project_id: int) -> Project:
+    project = session.scalar(_project_query().where(Project.id == project_id))
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    return project
+
+
+def _commit_project(session: Session, project: Project) -> Project:
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Project key already exists.") from None
+    return session.scalar(_project_query().where(Project.id == project.id))
 
 
 @router.get("", response_model=list[ProjectResponse])
@@ -66,17 +82,32 @@ def create_project(
         members=_load_members(session, payload.member_ids, owner.id),
     )
     session.add(project)
-    try:
-        session.commit()
-    except IntegrityError:
-        session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Project key already exists.") from None
-    return session.scalar(_project_query().where(Project.id == project.id))
+    return _commit_project(session, project)
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 def get_project(project_id: int, user: User = Depends(get_current_user), session: Session = Depends(get_db)) -> Project:
     return _get_visible_project(session, project_id, user)
+
+
+@router.put("/{project_id}", response_model=ProjectResponse)
+def update_project(
+    project_id: int,
+    payload: UpdateProjectRequest,
+    _: User = Depends(get_current_manager),
+    session: Session = Depends(get_db),
+) -> Project:
+    project = _get_project_for_manager(session, project_id)
+    owner = session.get(User, payload.owner_id)
+    if not owner:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Project owner does not exist.")
+    project.key = payload.key.upper()
+    project.name = payload.name.strip()
+    project.description = payload.description.strip()
+    project.owner = owner
+    if owner not in project.members:
+        project.members.append(owner)
+    return _commit_project(session, project)
 
 
 @router.put("/{project_id}/members", response_model=ProjectResponse)
@@ -86,12 +117,9 @@ def replace_project_members(
     _: User = Depends(get_current_manager),
     session: Session = Depends(get_db),
 ) -> Project:
-    project = session.scalar(_project_query().where(Project.id == project_id))
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    project = _get_project_for_manager(session, project_id)
     project.members = _load_members(session, payload.member_ids, project.owner_id)
-    session.commit()
-    return session.scalar(_project_query().where(Project.id == project.id))
+    return _commit_project(session, project)
 
 
 @router.post("/{project_id}/archive", response_model=ProjectResponse)
@@ -100,10 +128,17 @@ def archive_project(
     _: User = Depends(get_current_manager),
     session: Session = Depends(get_db),
 ) -> Project:
-    project = session.scalar(_project_query().where(Project.id == project_id))
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    project = _get_project_for_manager(session, project_id)
     project.archived = True
-    session.commit()
-    return session.scalar(_project_query().where(Project.id == project.id))
+    return _commit_project(session, project)
 
+
+@router.post("/{project_id}/restore", response_model=ProjectResponse)
+def restore_project(
+    project_id: int,
+    _: User = Depends(get_current_manager),
+    session: Session = Depends(get_db),
+) -> Project:
+    project = _get_project_for_manager(session, project_id)
+    project.archived = False
+    return _commit_project(session, project)
