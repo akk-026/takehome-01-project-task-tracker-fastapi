@@ -62,10 +62,15 @@ function projectCard(project, isManager, users) {
   return `<article class="project"><div><span class="project-key">${escapeHtml(project.key)}</span>${project.archived ? '<span class="archived">Archived</span>' : ''}</div><h2>${escapeHtml(project.name)}</h2><p>${escapeHtml(project.description || 'No description yet.')}</p><small><b>Owner:</b> ${escapeHtml(project.owner.name)} · <b>Members:</b> ${memberNames}</small><button class="open-project secondary" data-project-id="${project.id}">Open project</button>${controls}</article>`;
 }
 
-function taskCard(task, tasks, isManager) {
+function assignedTaskCard(task) {
+  return `<article class="task assigned-task"><div class="task-heading"><div><span class="project-key">${escapeHtml(task.project_key)}</span><h3>${escapeHtml(task.title)}</h3></div><span class="task-status ${task.status.toLowerCase()}">${escapeHtml(statusLabel(task.status))}</span></div><p>${escapeHtml(task.project_name)}</p><small><b>Due:</b> ${task.due_date || 'No due date'}</small><button class="open-project secondary" data-project-id="${task.project_id}">Open project</button></article>`;
+}
+
+function taskCard(task, tasks, isManager, projectMembers) {
   const blockerNames = task.blocker_ids.map(id => tasks.find(candidate => candidate.id === id)?.title || `Task #${id}`).map(escapeHtml).join(', ');
+  const assigneeNames = task.assignee_ids.map(id => projectMembers.find(member => member.id === id)?.name || `User #${id}`).map(escapeHtml).join(', ');
   const deleteControl = isManager ? `<button class="delete-task" data-task-id="${task.id}">Delete task</button>` : '';
-  return `<article class="task"><div class="task-heading"><h3>${escapeHtml(task.title)}</h3><div class="task-badges"><span class="task-status ${task.status.toLowerCase()}">${escapeHtml(statusLabel(task.status))}</span><span class="priority ${task.priority.toLowerCase()}">${escapeHtml(task.priority)}</span></div></div><p>${escapeHtml(task.description || 'No description yet.')}</p><small><b>Due:</b> ${task.due_date || 'No due date'} · <b>Blocked by:</b> ${blockerNames || 'Nothing'}</small>${statusControls(task)}<details><summary>Edit task</summary><form class="edit-task-form" data-task-id="${task.id}"><label>Title</label><input name="title" maxlength="300" value="${escapeHtml(task.title)}" required><label>Description</label><textarea name="description" maxlength="4000">${escapeHtml(task.description)}</textarea><label>Priority</label><select name="priority">${['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(priority => `<option value="${priority}" ${priority === task.priority ? 'selected' : ''}>${priority}</option>`).join('')}</select><label>Due date</label><input name="dueDate" type="date" value="${task.due_date || ''}"><fieldset><legend>Blocked by</legend>${taskChoices(tasks, task.blocker_ids, task.id)}</fieldset><button>Save task</button></form>${deleteControl}</details></article>`;
+  return `<article class="task"><div class="task-heading"><h3>${escapeHtml(task.title)}</h3><div class="task-badges"><span class="task-status ${task.status.toLowerCase()}">${escapeHtml(statusLabel(task.status))}</span><span class="priority ${task.priority.toLowerCase()}">${escapeHtml(task.priority)}</span></div></div><p>${escapeHtml(task.description || 'No description yet.')}</p><small><b>Due:</b> ${task.due_date || 'No due date'} · <b>Blocked by:</b> ${blockerNames || 'Nothing'} · <b>Assigned:</b> ${assigneeNames || 'Nobody'}</small>${statusControls(task)}<details><summary>Edit task</summary><form class="edit-task-form" data-task-id="${task.id}"><label>Title</label><input name="title" maxlength="300" value="${escapeHtml(task.title)}" required><label>Description</label><textarea name="description" maxlength="4000">${escapeHtml(task.description)}</textarea><label>Priority</label><select name="priority">${['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(priority => `<option value="${priority}" ${priority === task.priority ? 'selected' : ''}>${priority}</option>`).join('')}</select><label>Due date</label><input name="dueDate" type="date" value="${task.due_date || ''}"><fieldset><legend>Blocked by</legend>${taskChoices(tasks, task.blocker_ids, task.id)}</fieldset><fieldset><legend>Assignees</legend>${memberChoices(projectMembers, task.assignee_ids, 'assigneeIds')}</fieldset><button>Save task</button></form>${deleteControl}</details></article>`;
 }
 
 function taskPayload(values) {
@@ -74,7 +79,8 @@ function taskPayload(values) {
     description: values.get('description'),
     priority: values.get('priority'),
     due_date: values.get('dueDate') || null,
-    blocker_ids: values.getAll('blockerIds').map(Number)
+    blocker_ids: values.getAll('blockerIds').map(Number),
+    assignee_ids: values.getAll('assigneeIds').map(Number)
   };
 }
 
@@ -85,7 +91,7 @@ async function showProjectDetail(user, projectId, showArchived = false, error = 
       api(`/api/tasks/projects/${projectId}`)
     ]);
     const isManager = user.role === 'MANAGER';
-    root.innerHTML = `<div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>${escapeHtml(project.name)}</h1><p>${escapeHtml(project.description || 'No description yet.')}</p></div><button id="back-to-projects" class="secondary">← Projects</button></div>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<section class="panel"><h2>Create task</h2><form id="create-task"><label>Title</label><input name="title" maxlength="300" required><label>Description</label><textarea name="description" maxlength="4000"></textarea><label>Priority</label><select name="priority"><option value="LOW">Low</option><option value="MEDIUM" selected>Medium</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option></select><label>Due date</label><input name="dueDate" type="date"><fieldset><legend>Blocked by</legend>${taskChoices(tasks)}</fieldset><button>Create task</button></form></section><section><h2>Tasks</h2><div class="tasks">${tasks.length ? tasks.map(task => taskCard(task, tasks, isManager)).join('') : '<p class="hint">No tasks in this project yet.</p>'}</div></section>`;
+    root.innerHTML = `<div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>${escapeHtml(project.name)}</h1><p>${escapeHtml(project.description || 'No description yet.')}</p></div><button id="back-to-projects" class="secondary">← Projects</button></div>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<section class="panel"><h2>Create task</h2><form id="create-task"><label>Title</label><input name="title" maxlength="300" required><label>Description</label><textarea name="description" maxlength="4000"></textarea><label>Priority</label><select name="priority"><option value="LOW">Low</option><option value="MEDIUM" selected>Medium</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option></select><label>Due date</label><input name="dueDate" type="date"><fieldset><legend>Blocked by</legend>${taskChoices(tasks)}</fieldset><fieldset><legend>Assignees</legend>${memberChoices(project.members, [], 'assigneeIds')}</fieldset><button>Create task</button></form></section><section><h2>Tasks</h2><div class="tasks">${tasks.length ? tasks.map(task => taskCard(task, tasks, isManager, project.members)).join('') : '<p class="hint">No tasks in this project yet.</p>'}</div></section>`;
     document.querySelector('#back-to-projects').onclick = () => showHome(user, '', showArchived);
     document.querySelector('#create-task').onsubmit = async event => {
       event.preventDefault();
@@ -127,16 +133,17 @@ async function showProjectDetail(user, projectId, showArchived = false, error = 
 async function showHome(user, error = '', showArchived = false) {
   try {
     const isManager = user.role === 'MANAGER';
-    const [projects, users] = await Promise.all([
+    const [projects, users, assignedTasks] = await Promise.all([
       api(isManager && showArchived ? '/api/projects?include_archived=true' : '/api/projects'),
-      isManager ? api('/api/users') : Promise.resolve([])
+      isManager ? api('/api/users') : Promise.resolve([]),
+      api('/api/tasks/assigned')
     ]);
     const activeProjects = projects.filter(project => !project.archived);
     const archivedProjects = projects.filter(project => project.archived);
     const createProject = isManager ? `<section class="panel"><h2>Create project</h2><form id="create-project"><label>Key</label><input name="key" maxlength="12" placeholder="OPS" required><label>Name</label><input name="name" maxlength="160" required><label>Description</label><input name="description" maxlength="2000"><label>Owner</label><select name="ownerId">${users.map(person => `<option value="${person.id}">${escapeHtml(person.name)}</option>`).join('')}</select><fieldset><legend>Project members</legend>${memberChoices(users, [])}</fieldset><button>Create project</button></form></section>` : '<p class="hint">You only see projects where you are a member.</p>';
     const archiveToggle = isManager ? `<button id="toggle-archived" class="secondary">${showArchived ? 'Hide archived projects' : 'Show archived projects'}</button>` : '';
     const archivedSection = showArchived ? `<section><h2>Archived projects</h2><div class="projects">${archivedProjects.length ? archivedProjects.map(project => projectCard(project, true, users)).join('') : '<p class="hint">No archived projects.</p>'}</div></section>` : '';
-    root.innerHTML = `<div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>Welcome, ${escapeHtml(user.name.split(' ')[0])}.</h1><span class="role">${isManager ? 'Manager' : 'Member'}</span></div><div class="header-actions">${archiveToggle}<button id="logout" class="secondary">Sign out</button></div></div>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}${createProject}<section><h2>${isManager ? 'All active projects' : 'Your projects'}</h2><div class="projects">${activeProjects.length ? activeProjects.map(project => projectCard(project, isManager, users)).join('') : '<p class="hint">No active projects yet.</p>'}</div></section>${archivedSection}`;
+    root.innerHTML = `<div class="topbar"><div><div class="brand">✦ NORTHSTAR</div><h1>Welcome, ${escapeHtml(user.name.split(' ')[0])}.</h1><span class="role">${isManager ? 'Manager' : 'Member'}</span></div><div class="header-actions">${archiveToggle}<button id="logout" class="secondary">Sign out</button></div></div>${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}<section><h2>Assigned to you</h2><div class="tasks">${assignedTasks.length ? assignedTasks.map(assignedTaskCard).join('') : '<p class="hint">No tasks are assigned to you.</p>'}</div></section>${createProject}<section><h2>${isManager ? 'All active projects' : 'Your projects'}</h2><div class="projects">${activeProjects.length ? activeProjects.map(project => projectCard(project, isManager, users)).join('') : '<p class="hint">No active projects yet.</p>'}</div></section>${archivedSection}`;
     document.querySelector('#logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }); localStorage.removeItem(tokenKey); showLogin(); };
     document.querySelectorAll('.open-project').forEach(button => {
       button.onclick = () => showProjectDetail(user, button.dataset.projectId, showArchived);

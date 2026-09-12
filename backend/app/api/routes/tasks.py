@@ -4,15 +4,15 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies import get_current_manager, get_current_user, get_db
 from app.models.project import Project, project_members
-from app.models.task import Task, TaskStatus, task_blockers
+from app.models.task import Task, TaskStatus, task_assignees, task_blockers
 from app.models.user import User, UserRole
-from app.schemas.tasks import TaskResponse, TaskStatusChangeRequest, TaskWriteRequest
+from app.schemas.tasks import AssignedTaskResponse, TaskResponse, TaskStatusChangeRequest, TaskWriteRequest
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 def _task_query():
-    return select(Task).options(selectinload(Task.blockers))
+    return select(Task).options(selectinload(Task.blockers), selectinload(Task.assignees))
 
 
 def _clean_title(title: str) -> str:
@@ -65,6 +65,27 @@ def _set_blockers(session: Session, task: Task, blocker_ids: list[int]) -> None:
     task.blockers = blockers
 
 
+def _set_assignees(session: Session, task: Task, assignee_ids: list[int]) -> None:
+    requested_ids = set(assignee_ids)
+    if not requested_ids:
+        task.assignees = []
+        return
+    assignees = list(
+        session.scalars(
+            select(User)
+            .join(project_members)
+            .where(User.id.in_(requested_ids), project_members.c.project_id == task.project_id)
+        )
+    )
+    found_ids = {assignee.id for assignee in assignees}
+    if found_ids != requested_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Every assignee must be a member of this task's project.",
+        )
+    task.assignees = assignees
+
+
 def _move_task(task: Task, target_status: TaskStatus) -> None:
     if target_status not in task.available_statuses:
         if (
@@ -98,6 +119,19 @@ def list_project_tasks(
     return list(session.scalars(_task_query().where(Task.project_id == project_id, Task.deleted.is_(False)).order_by(Task.updated_at.desc())))
 
 
+@router.get("/assigned", response_model=list[AssignedTaskResponse])
+def list_assigned_tasks(user: User = Depends(get_current_user), session: Session = Depends(get_db)) -> list[Task]:
+    return list(
+        session.scalars(
+            _task_query()
+            .options(selectinload(Task.project))
+            .join(task_assignees)
+            .where(task_assignees.c.user_id == user.id, Task.deleted.is_(False))
+            .order_by(Task.updated_at.desc())
+        )
+    )
+
+
 @router.post("/projects/{project_id}", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 def create_task(
     project_id: int,
@@ -116,6 +150,7 @@ def create_task(
     session.add(task)
     session.flush()
     _set_blockers(session, task, payload.blocker_ids)
+    _set_assignees(session, task, payload.assignee_ids)
     session.commit()
     return session.scalar(_task_query().where(Task.id == task.id))
 
@@ -151,6 +186,7 @@ def update_task(
     task.priority = payload.priority
     task.due_date = payload.due_date
     _set_blockers(session, task, payload.blocker_ids)
+    _set_assignees(session, task, payload.assignee_ids)
     if task.status == TaskStatus.DONE and any(blocker.status != TaskStatus.DONE for blocker in task.blockers):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

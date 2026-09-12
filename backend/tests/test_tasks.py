@@ -168,3 +168,67 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(completed["available_statuses"], ["IN_PROGRESS"])
         reopened = self.move_task(task["id"], "IN_PROGRESS", self.dan)
         self.assertEqual(reopened["status"], "IN_PROGRESS")
+
+    def test_assignments_require_project_membership_and_are_removed_with_membership(self) -> None:
+        project = self.create_project(
+            "OPS",
+            self.dan["user"]["id"],
+            [self.dan["user"]["id"], self.priya["user"]["id"]],
+        )
+        task = self.create_task(
+            project["id"],
+            {"title": "Coordinate launch", "assignee_ids": [self.priya["user"]["id"]]},
+            self.dan,
+        )
+        self.assertEqual(task["assignee_ids"], [self.priya["user"]["id"]])
+
+        updated = self.client.put(
+            f"/api/tasks/{task['id']}",
+            headers=self.headers(self.dan),
+            json={
+                "title": "Coordinate launch",
+                "description": "Keep the launch team aligned.",
+                "priority": "HIGH",
+                "due_date": None,
+                "blocker_ids": [],
+                "assignee_ids": [self.dan["user"]["id"], self.priya["user"]["id"]],
+            },
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(
+            updated.json()["assignee_ids"],
+            [self.dan["user"]["id"], self.priya["user"]["id"]],
+        )
+
+        second_task = self.create_task(
+            project["id"],
+            {"title": "Share the brief", "assignee_ids": [self.dan["user"]["id"]]},
+            self.dan,
+        )
+
+        dan_assigned = self.client.get("/api/tasks/assigned", headers=self.headers(self.dan))
+        self.assertEqual(dan_assigned.status_code, 200)
+        self.assertEqual({assigned["id"] for assigned in dan_assigned.json()}, {task["id"], second_task["id"]})
+        self.assertTrue(all(assigned["project_key"] == project["key"] for assigned in dan_assigned.json()))
+
+        invalid_assignee = self.client.post(
+            f"/api/tasks/projects/{project['id']}",
+            headers=self.headers(self.dan),
+            json={"title": "Invalid assignment", "assignee_ids": [self.manager["user"]["id"]]},
+        )
+        self.assertEqual(invalid_assignee.status_code, 422)
+        self.assertIn("member", invalid_assignee.json()["detail"])
+
+        removed = self.client.put(
+            f"/api/projects/{project['id']}/members",
+            headers=self.headers(self.manager),
+            json={"member_ids": [self.dan["user"]["id"]]},
+        )
+        self.assertEqual(removed.status_code, 200)
+        refreshed_task = self.client.get(f"/api/tasks/{task['id']}", headers=self.headers(self.manager)).json()
+        self.assertEqual(refreshed_task["assignee_ids"], [self.dan["user"]["id"]])
+        self.assertEqual(
+            {assigned["id"] for assigned in self.client.get("/api/tasks/assigned", headers=self.headers(self.dan)).json()},
+            {task["id"], second_task["id"]},
+        )
+        self.assertEqual(self.client.get("/api/tasks/assigned", headers=self.headers(self.priya)).json(), [])

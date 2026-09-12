@@ -32,6 +32,14 @@ task_blockers = Table(
 )
 
 
+task_assignees = Table(
+    "task_assignees",
+    Base.metadata,
+    Column("task_id", ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
 class Task(Base):
 
     __tablename__ = "tasks"
@@ -54,10 +62,24 @@ class Task(Base):
         primaryjoin=id == task_blockers.c.task_id,
         secondaryjoin=id == task_blockers.c.blocking_task_id,
     )
+    assignees = relationship("User", secondary=task_assignees)
+    project = relationship("Project")
 
     @property
     def blocker_ids(self) -> list[int]:
         return [blocker.id for blocker in self.blockers]
+
+    @property
+    def assignee_ids(self) -> list[int]:
+        return sorted(assignee.id for assignee in self.assignees)
+
+    @property
+    def project_key(self) -> str:
+        return self.project.key
+
+    @property
+    def project_name(self) -> str:
+        return self.project.name
 
     @property
     def available_statuses(self) -> list[TaskStatus]:

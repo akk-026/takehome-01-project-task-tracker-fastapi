@@ -12,6 +12,9 @@ Tasks begin in Backlog and advance through In Progress, In Review, and Done. The
 from either active state and return to that state when unblocked; reopening a completed task returns
 it to In Progress. The API supplies each task's currently legal next moves, while independently
 rejecting invalid transitions and completion with unfinished blockers.
+Tasks also support multiple assignees, limited to the task's project members. Each person's home
+view includes all of their assigned tasks across projects; removing a member from a project clears
+their assignments in that project.
 
 ## Run locally
 

@@ -11,6 +11,7 @@ class TaskWriteRequest(BaseModel):
     priority: TaskPriority = TaskPriority.MEDIUM
     due_date: date | None = None
     blocker_ids: list[int] = Field(default_factory=list)
+    assignee_ids: list[int] = Field(default_factory=list)
 
 
 class TaskStatusChangeRequest(BaseModel):
@@ -29,6 +30,12 @@ class TaskResponse(BaseModel):
     status: TaskStatus
     blocked_from: TaskStatus | None
     blocker_ids: list[int]
+    assignee_ids: list[int]
     available_statuses: list[TaskStatus]
     created_at: datetime
     updated_at: datetime
+
+
+class AssignedTaskResponse(TaskResponse):
+    project_key: str
+    project_name: str

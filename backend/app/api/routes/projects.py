@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies import get_current_manager, get_current_user, get_db
 from app.models.project import Project, project_members
+from app.models.task import Task, task_assignees
 from app.models.user import User, UserRole
 from app.schemas.projects import CreateProjectRequest, ProjectResponse, ReplaceProjectMembersRequest, UpdateProjectRequest
 
@@ -118,7 +119,17 @@ def replace_project_members(
     session: Session = Depends(get_db),
 ) -> Project:
     project = _get_project_for_manager(session, project_id)
-    project.members = _load_members(session, payload.member_ids, project.owner_id)
+    existing_member_ids = {member.id for member in project.members}
+    members = _load_members(session, payload.member_ids, project.owner_id)
+    removed_member_ids = existing_member_ids - {member.id for member in members}
+    project.members = members
+    if removed_member_ids:
+        session.execute(
+            delete(task_assignees).where(
+                task_assignees.c.user_id.in_(removed_member_ids),
+                task_assignees.c.task_id.in_(select(Task.id).where(Task.project_id == project.id)),
+            )
+        )
     return _commit_project(session, project)
 
 
