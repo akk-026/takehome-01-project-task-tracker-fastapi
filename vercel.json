@@ -5,7 +5,7 @@
   ],
   "functions": {
     "api/index.py": {
-      "includeFiles": ["backend/**", "frontend/**"]
+      "includeFiles": "{backend/**,frontend/**}"
     }
   }
 }
