@@ -1,7 +1,8 @@
 # Plan
 
-I split the work into focused, incremental feature commits so each requirement can be reviewed and
-tested independently.
+I planned for roughly six two-hour sessions (about 12 hours total), with a small amount of extra
+time at the end for documentation, test cleanup and deployment preparation. I split the work into
+focused commits so a reviewer can see the order in which requirements were built and verified.
 
 1. Set up FastAPI, SQLAlchemy, SQLite, seeded users, and bearer-session authentication.
 2. Add server-enforced manager/member authorization and project membership.
@@ -24,6 +25,11 @@ tested independently.
 12. Prepare a Vercel deployment entrypoint and route all browser requests through the existing
     FastAPI application. Keep SQLite for local use while adding a hosted Postgres configuration for
     deployment.
+
+The core functional work took about the planned 12 hours. Documentation, deployment configuration
+and final verification took additional time. I did not cut a required goal; I deliberately left out
+invitations, password reset, real-time updates, dependency-cycle detection, email delivery and
+keyboard-first board controls because they were either outside the brief or optional stretch work.
 
 All ten required features, the optional board, and a Vercel-ready deployment configuration are
 implemented in focused, independently testable commits.
