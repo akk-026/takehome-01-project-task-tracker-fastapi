@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -28,6 +29,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def restore_vercel_rewrite_path(request: Request, call_next):
+    """Restore the original URL after Vercel dispatches to the Python function.
+
+    Vercel's rewrite targets the function file (`/api/index.py`), whereas
+    FastAPI needs the browser's original path to match API routes and static
+    assets. The rewrite adds the original path as this private query value.
+    """
+    rewrite_key = "__northstar_path"
+    query_items = parse_qsl(request.scope["query_string"].decode(), keep_blank_values=True)
+    original_path = next((value for key, value in query_items if key == rewrite_key), None)
+    if original_path is not None:
+        request.scope["path"] = "/" + original_path.lstrip("/")
+        request.scope["raw_path"] = request.scope["path"].encode()
+        request.scope["query_string"] = urlencode(
+            [(key, value) for key, value in query_items if key != rewrite_key], doseq=True
+        ).encode()
+    return await call_next(request)
+
+
 app.include_router(api_router)
 frontend_directory = Path(__file__).resolve().parents[2] / "frontend"
 app.mount("/", StaticFiles(directory=frontend_directory, html=True), name="frontend")

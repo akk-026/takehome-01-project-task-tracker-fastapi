@@ -12,3 +12,10 @@ class HealthCheckTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_vercel_rewrite_preserves_api_path(self) -> None:
+        with TestClient(app) as client:
+            response = client.get("/api/index.py?__northstar_path=api/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
