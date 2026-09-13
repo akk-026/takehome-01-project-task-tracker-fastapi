@@ -1,6 +1,15 @@
 import hashlib
 import hmac
 import secrets
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
+from app.models.user_session import UserSession
+
+
+SESSION_LIFETIME = timedelta(days=7)
 
 
 def hash_password(password: str) -> str:
@@ -25,22 +34,36 @@ def verify_password(password: str, stored_hash: str) -> bool:
     return hmac.compare_digest(hashlib.sha256(password.encode("utf-8")).hexdigest(), stored_hash)
 
 
-class SessionStore:
-    """In-memory opaque sessions. A persistent auth provider is outside this take-home's scope."""
-
-    def __init__(self) -> None:
-        self._sessions: dict[str, int] = {}
-
-    def create(self, user_id: int) -> str:
-        token = secrets.token_urlsafe(32)
-        self._sessions[token] = user_id
-        return token
-
-    def user_id_for(self, token: str) -> int | None:
-        return self._sessions.get(token)
-
-    def remove(self, token: str) -> None:
-        self._sessions.pop(token, None)
+def _token_digest(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-session_store = SessionStore()
+def create_session(session: Session, user_id: int) -> str:
+    """Persist an opaque token so a request can land on any serverless instance."""
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    session.execute(delete(UserSession).where(UserSession.expires_at <= now))
+    session.add(
+        UserSession(
+            token_digest=_token_digest(token),
+            user_id=user_id,
+            expires_at=now + SESSION_LIFETIME,
+        )
+    )
+    session.commit()
+    return token
+
+
+def session_user_id(session: Session, token: str) -> int | None:
+    now = datetime.now(timezone.utc)
+    return session.scalar(
+        select(UserSession.user_id).where(
+            UserSession.token_digest == _token_digest(token),
+            UserSession.expires_at > now,
+        )
+    )
+
+
+def remove_session(session: Session, token: str) -> None:
+    session.execute(delete(UserSession).where(UserSession.token_digest == _token_digest(token)))
+    session.commit()

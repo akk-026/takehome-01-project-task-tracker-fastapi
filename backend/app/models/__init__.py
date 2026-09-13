@@ -3,5 +3,6 @@ from app.models.task import Task, TaskPriority, TaskStatus, task_assignees, task
 from app.models.task_alert import TaskAlertDismissal
 from app.models.task_activity import TaskActivity
 from app.models.user import User, UserRole
+from app.models.user_session import UserSession
 
-__all__ = ["Project", "Task", "TaskActivity", "TaskAlertDismissal", "TaskPriority", "TaskStatus", "User", "UserRole", "project_members", "task_assignees", "task_blockers"]
+__all__ = ["Project", "Task", "TaskActivity", "TaskAlertDismissal", "TaskPriority", "TaskStatus", "User", "UserRole", "UserSession", "project_members", "task_assignees", "task_blockers"]

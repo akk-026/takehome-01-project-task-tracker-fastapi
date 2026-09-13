@@ -45,3 +45,12 @@ class AuthenticationTests(unittest.TestCase):
         headers = {"authorization": f"Bearer {manager['token']}"}
         self.assertEqual(self.client.post("/api/auth/logout", headers=headers).status_code, 204)
         self.assertEqual(self.client.get("/api/auth/me", headers=headers).status_code, 401)
+
+    def test_session_remains_valid_for_a_new_client(self) -> None:
+        manager = self.login("alice@northstar.test", "manager123")
+        headers = {"authorization": f"Bearer {manager['token']}"}
+        with TestClient(app) as another_client:
+            response = another_client.get("/api/auth/me", headers=headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["email"], "alice@northstar.test")

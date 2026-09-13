@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.models.user import User, UserRole
-from app.services.security import session_store
+from app.services.security import session_user_id
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -22,7 +22,7 @@ def get_db() -> Generator[Session, None, None]:
 def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme), session: Session = Depends(get_db)) -> User:
     if not credentials or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in to continue.")
-    user_id = session_store.user_id_for(credentials.credentials)
+    user_id = session_user_id(session, credentials.credentials)
     user = session.get(User, user_id) if user_id else None
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in to continue.")
