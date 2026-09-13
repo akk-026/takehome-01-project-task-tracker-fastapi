@@ -42,7 +42,7 @@
 - **Why:** The downloaded CSV accurately represents every matching visible task, not only a page or
   a potentially divergent client-side result.
 
-## 7. Reverse the compact frontend style
+## 7. Reversed decision: compact frontend style
 
 - **Initially chose:** Small, dependency-free JavaScript written as compact inline templates.
 - **Changed to:** Named template, payload, download, and event-binding functions.

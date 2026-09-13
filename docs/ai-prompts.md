@@ -53,10 +53,11 @@ approach where needed, and verified the resulting behaviour with the test suite 
      totals, filters, ordering, member visibility, and CSV output against the shared query path.
 
 7. “For a multi-select status update, should I use one transaction for every selected task?”
-   - Use a savepoint for each selected task rather than an all-or-nothing transaction. This lets
-     valid updates commit even if another selected task has an illegal lifecycle move, while still
-     rolling back the failed task safely. Return a success or a clear rejection reason for every
-     task ID, and test a deliberately mixed valid/invalid batch.
+   - An initial AI suggestion to make this an all-or-nothing transaction was wrong for the brief:
+     one invalid lifecycle move would have undone unrelated valid selections. The correction was to
+     use a savepoint for each selected task. This lets valid updates commit while rolling back only
+     the failed task safely; the response returns a success or clear rejection reason for every task
+     ID, and a deliberately mixed valid/invalid batch verifies the behaviour.
 
 ## Dashboard, history and alerts
 
