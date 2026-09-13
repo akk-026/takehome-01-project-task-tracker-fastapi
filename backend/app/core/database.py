@@ -14,7 +14,16 @@ if database_url.startswith("postgres://"):
 elif database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
-engine_options = {"connect_args": {"check_same_thread": False}} if database_url.startswith("sqlite") else {"pool_pre_ping": True}
+if database_url.startswith("sqlite"):
+    engine_options = {"connect_args": {"check_same_thread": False}}
+else:
+    # Supabase's transaction pooler may reuse a database connection across
+    # serverless invocations.  psycopg's server-side prepared statements are
+    # connection-specific, so disable them to avoid duplicate-name failures.
+    engine_options = {
+        "pool_pre_ping": True,
+        "connect_args": {"prepare_threshold": None},
+    }
 engine = create_engine(database_url, **engine_options)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 

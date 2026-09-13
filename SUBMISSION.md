@@ -3,7 +3,7 @@
 ## Links
 
 - **GitHub repository:** https://github.com/akk-026/takehome-01-project-task-tracker-fastapi
-- **Live application:** To be added after the Vercel production deployment completes.
+- **Live application:** https://takehome-01-project-task-tracker-fa.vercel.app
 
 ## Demo credentials
 
@@ -47,8 +47,8 @@ so the first request after a long idle period can take a little longer than norm
 
 ## Time spent
 
-About 12 hours for the planned functional work, plus final documentation, deployment configuration
-and verification.
+About 14 hours across the planned functional work, test coverage, documentation, deployment
+configuration, and production verification.
 
 ## What I would do with another 12 hours
 
