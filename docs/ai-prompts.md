@@ -105,6 +105,93 @@ approach where needed, and verified the resulting behaviour with the test suite 
      pooler, disable psycopg prepared statements to avoid duplicate prepared-statement failures, and
      keep all database credentials in deployment environment variables rather than the repository.
 
+## Implementation-level follow-ups
+
+14. “Can you show me the SQLAlchemy pattern for a project query that managers can use for every
+    project, but members can only use for projects where they are a member?”
+   - Start with one reusable statement that eagerly loads the owner and members, then narrow it for
+     non-managers. Keeping the visibility rule in one helper prevents different endpoints from
+     gradually enforcing different policies. For example:
+
+     ```python
+     def visible_projects_statement(user: User):
+         statement = select(Project).options(
+             selectinload(Project.owner), selectinload(Project.members)
+         )
+         if user.role == UserRole.MANAGER:
+             return statement
+         return statement.join(Project.members).where(User.id == user.id)
+     ```
+
+     Use the same helper for the project list, task lookups, dashboard calculations, and export
+     queries. At the single-project level, load the project through the scoped statement and return
+     a 404 when it is absent; do not reveal whether an inaccessible project exists.
+
+15. “Can you show the FastAPI dependency code that checks a bearer token once and lets route
+    handlers receive the current user?”
+   - Create one dependency that extracts the `Authorization: Bearer …` credential, resolves the
+     session token, and loads the user from the database. Route handlers then declare a `User`
+     parameter instead of repeating authentication logic:
+
+     ```python
+     bearer_scheme = HTTPBearer(auto_error=False)
+
+     def get_current_user(
+         credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+         session: Session = Depends(get_db),
+     ) -> User:
+         if not credentials or credentials.scheme.lower() != "bearer":
+             raise HTTPException(status_code=401, detail="Please sign in to continue.")
+         user_id = session_user_id(session, credentials.credentials)
+         user = session.get(User, user_id) if user_id else None
+         if not user:
+             raise HTTPException(status_code=401, detail="Please sign in to continue.")
+         return user
+     ```
+
+     Add a small `get_current_manager` dependency on top of this one for manager-only routes. This
+     keeps role checks on the server even when a user manually calls an endpoint outside the UI.
+
+16. “My login works locally, but Vercel sometimes says ‘Please sign in to continue’ immediately
+    after login. What code should I change?”
+   - Do not keep opaque tokens in a module-level dictionary: a Vercel request can run on a different
+     serverless instance from the login request, so that dictionary is not shared. Store a hash of
+     each generated token in Postgres instead, along with the user ID and expiry. On every request,
+     hash the supplied token and look it up:
+
+     ```python
+     def session_user_id(session: Session, token: str) -> int | None:
+         return session.scalar(
+             select(UserSession.user_id).where(
+                 UserSession.token_digest == sha256(token.encode()).hexdigest(),
+                 UserSession.expires_at > datetime.now(timezone.utc),
+             )
+         )
+     ```
+
+     This keeps the raw token out of the database, makes sessions work across serverless instances,
+     and still permits logout by deleting the matching hashed session row.
+
+17. “The Vercel function is deployed, but `/api/health` returns FastAPI’s 404 while the function
+    itself is ready. How can I preserve the original request path through a rewrite?”
+   - A rewrite to `/api/index.py` can make FastAPI see the function-file path instead of the browser
+     path. Pass the original path as a private rewrite query value, then restore it in lightweight
+     middleware before routing:
+
+     ```json
+     { "source": "/(.*)", "destination": "/api/index.py?__northstar_path=$1" }
+     ```
+
+     ```python
+     original_path = request.query_params.get("__northstar_path")
+     if original_path is not None:
+         request.scope["path"] = "/" + original_path.lstrip("/")
+     ```
+
+     Remove the private parameter from the forwarded query string as part of the middleware. That
+     lets the same ASGI app route `/api/*` normally and serve the browser client’s root and static
+     assets without changing their public URLs.
+
 ## Verification approach
 
 For generated code, I did not treat a successful response as proof of correctness. I checked the
